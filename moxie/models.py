@@ -14,8 +14,9 @@ def _id() -> str:
 class Transaction:
     date: str          # ISO date "YYYY-MM-DD"
     merchant: str
-    amount: float
+    amount: float      # spend positive; credits/refunds negative
     description: str = ""
+    currency: str = "$"
     id: str = field(default_factory=_id)
 
 
@@ -41,6 +42,7 @@ class ProposedAction:
     amount: float = 0.0
     est_savings: float = 0.0
     draft: str = ""                       # the email/letter we would send
+    currency: str = "$"
     evidence_receipt_id: Optional[str] = None
     status: str = "proposed"              # proposed | approved | skipped | executed | denied
     id: str = field(default_factory=_id)

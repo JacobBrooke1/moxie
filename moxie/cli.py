@@ -62,9 +62,10 @@ def cmd_scan(args):
         return
 
     total = sum(a.est_savings for a in actions)
-    print(f"Found {len(actions)} thing(s) worth ~${total:.2f}/yr:\n")
+    cur = getattr(actions[0], "currency", "$")
+    print(f"Found {len(actions)} thing(s) worth ~{cur}{total:.2f}/yr:\n")
     for a in actions:
-        print(f"  • [{a.kind}] {a.description}  (~${a.est_savings:.2f})")
+        print(f"  • [{a.kind}] {a.description}  (~{cur}{a.est_savings:.2f})")
     print("\nRun  moxie review  to act on these — you approve each one.")
 
 

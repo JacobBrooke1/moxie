@@ -16,7 +16,7 @@ def request_approval(action, prompt_fn=input) -> bool:
     print(f"\n  Action : {action.kind} @ {action.merchant}")
     print(f"  What   : {action.description}")
     if action.est_savings:
-        print(f"  Saves  : ~${action.est_savings:.2f}")
+        print(f"  Saves  : ~{getattr(action, 'currency', '$')}{action.est_savings:.2f}")
     if action.draft:
         print("  Draft  :")
         for line in action.draft.splitlines():
