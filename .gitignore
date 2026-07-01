@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Moxie local data — NEVER commit real financial data
+.moxie/
+*.db
+*.sqlite
+*.sqlite3
+audit.log
+receipts/
+data/
+
+# Secrets
+.env
+*.key
+*.pem
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

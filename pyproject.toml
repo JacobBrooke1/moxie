@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moxie-agent"
+version = "0.0.1"
+description = "Moxie — the open-source money agent that acts on your money, only with your approval. Local-first, consent-first."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Moxie contributors" }]
+keywords = ["ai-agent", "personal-finance", "open-source", "local-first", "privacy", "subscriptions"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Environment :: Console",
+]
+# Core runs on the standard library alone — the demo needs no third-party packages.
+dependencies = []
+
+[project.optional-dependencies]
+# Core — including SKILL.md skills — runs on the stdlib alone. Install only what you need:
+plaid = ["plaid-python>=18.0"]  # read-only bank data
+ocr = ["pytesseract>=0.3.10", "Pillow>=10.0"]  # photo receipts (local OCR)
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+moxie = "moxie.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["moxie*"]
