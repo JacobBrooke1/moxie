@@ -56,6 +56,8 @@ cd moxie
 pip install -e .          # or: ./install.sh
 
 # try it with built-in sample data — no bank, no API key needed
+# (Windows: if `moxie` isn't recognized, pip's Scripts dir isn't on PATH —
+#  use `python -m moxie <command>` instead; works everywhere)
 moxie init
 moxie scan            # finds issues in sample transactions
 moxie review          # shows each fix, asks you to approve, then drafts it
