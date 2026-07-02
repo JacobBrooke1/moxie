@@ -27,6 +27,7 @@ HELP = (
     "🦡 Moxie — your money agent.\n\n"
     "/findings — what I've found\n"
     "/scan — re-check the transactions on file\n"
+    "/budget — this month: in / out / left\n"
     "/approve N — approve finding N (I'll ask you to confirm)\n"
     "/skip N — skip & remember (no nagging for 60 days)\n"
     "/help — this message\n\n"
@@ -121,6 +122,14 @@ class Bot:
         if low == "/findings":
             return self._findings_text()
 
+        if low == "/budget":
+            from .snapshot import format_snapshot, snapshot_from_store
+            if not self.store.load_transactions():
+                return ("No data yet — on your computer run  moxie scan --csv/--pdf  "
+                        "or  moxie sync.")
+            return ("🦡 The money picture (derived from your data — you decide):\n\n"
+                    + format_snapshot(snapshot_from_store(self.store)))
+
         if low == "/scan":
             txns = self.store.load_transactions()
             if not txns:
@@ -175,8 +184,10 @@ class Bot:
             return ("I can list and act on findings here, but for questions I need "
                     "a brain: set MOXIE_API_KEY in .env on your computer "
                     "(your own Anthropic key), then restart me.")
+        from .snapshot import snapshot_from_store
         txns = self.store.load_transactions()
-        return self.brain.ask(text, txns, self.store.load_actions())
+        return self.brain.ask(text, txns, self.store.load_actions(),
+                              snapshot=snapshot_from_store(self.store))
 
     # ---- daily loop --------------------------------------------------------
     def daily_tick(self, now=None) -> "str | None":
@@ -199,7 +210,9 @@ class Bot:
             return None
         if self.brain.available:
             try:
-                briefing = self.brain.triage(actions, txns)
+                from .snapshot import snapshot_from_store
+                briefing = self.brain.triage(actions, txns,
+                                             snapshot=snapshot_from_store(self.store))
                 return f"🦡 Morning briefing:\n\n{briefing}\n\n{self._findings_text()}"
             except Exception:
                 pass

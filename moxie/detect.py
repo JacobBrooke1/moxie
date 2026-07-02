@@ -109,13 +109,16 @@ def find_duplicate_charges(transactions) -> "list[ProposedAction]":
     return actions
 
 
-def find_zombie_subscriptions(transactions) -> "list[ProposedAction]":
+def recurring_monthly(transactions) -> "list[dict]":
+    """Recurring ~monthly charges (subscriptions, standing-order bills):
+    merchant, typical monthly amount, the months seen, and each raw charge.
+    Shared by the zombie-subscription detector and the money snapshot."""
     by_merchant = defaultdict(list)
     for t in transactions:
         if t.amount > 0:
             by_merchant[t.merchant].append(t)
 
-    actions = []
+    out = []
     for merchant, txns in sorted(by_merchant.items()):
         months = sorted({t.date[:7] for t in txns})
         if len(months) < SUBSCRIPTION_MIN_MONTHS:
@@ -128,7 +131,21 @@ def find_zombie_subscriptions(transactions) -> "list[ProposedAction]":
         mid = median(amounts)
         if mid <= 0 or (max(amounts) - min(amounts)) > max(PRICE_TOLERANCE * mid, 1.0):
             continue
-        cur = _cur(txns)
+        out.append({
+            "merchant": merchant,
+            "monthly": round(mid, 2),
+            "months": months,
+            "currency": _cur(txns),
+            "transactions": sorted(txns, key=lambda t: t.date),
+        })
+    return out
+
+
+def find_zombie_subscriptions(transactions) -> "list[ProposedAction]":
+    actions = []
+    for sub in recurring_monthly(transactions):
+        merchant, mid, months, cur = (sub["merchant"], sub["monthly"],
+                                      sub["months"], sub["currency"])
         actions.append(
             ProposedAction(
                 kind="cancel_subscription",

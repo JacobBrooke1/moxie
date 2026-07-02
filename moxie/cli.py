@@ -129,9 +129,21 @@ def cmd_ask(args):
               ".env file (bring your own Anthropic key), or set MOXIE_OFFLINE=true to "
               "acknowledge rules-only mode.")
         return
+    from .snapshot import snapshot_from_store
     question = " ".join(args.question)
     audit.append("ask", {"question": question[:200]})
-    print(brain.ask(question, store.load_transactions(), store.load_actions()))
+    print(brain.ask(question, store.load_transactions(), store.load_actions(),
+                    snapshot=snapshot_from_store(store)))
+
+
+def cmd_budget(args):
+    from .snapshot import format_snapshot, snapshot_from_store
+    config, store, audit = _ctx()
+    if not store.load_transactions():
+        print("No transactions on file yet. Run  moxie scan --csv/--pdf  or  moxie sync.")
+        return
+    print("🦡 The money picture (figures derived from your data — you decide):\n")
+    print(format_snapshot(snapshot_from_store(store)))
 
 
 def cmd_connect(args):
@@ -334,6 +346,9 @@ def main(argv=None):
     p = sub.add_parser("ask", help="ask the brain a money question (needs MOXIE_API_KEY)")
     p.add_argument("question", nargs="+", help='e.g.  moxie ask "can I afford £120 trainers?"')
     p.set_defaults(func=cmd_ask)
+
+    p = sub.add_parser("budget", help="this month's money picture: in / out / left")
+    p.set_defaults(func=cmd_budget)
 
     p = sub.add_parser("telegram", help="run the Telegram bot + daily loop (needs TELEGRAM_BOT_TOKEN)")
     p.set_defaults(func=cmd_telegram)

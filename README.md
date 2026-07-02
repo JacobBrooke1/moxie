@@ -144,7 +144,7 @@ It binds to `127.0.0.1` only. Running Moxie on a Mac mini or a VPS? Reach the da
 Moxie has three layers, and you can stop at any of them:
 
 1. **Rules** (no key needed) — deterministic, explainable detectors. Everything above runs on these.
-2. **The brain** (bring your own Anthropic key) — set `MOXIE_API_KEY` in a `.env` file and ask it things: `moxie ask "can I afford £120 trainers this month?"`. It triages findings, flags false positives, and suggests alternatives for subscriptions you keep but barely use. Its standing orders live in `~/.moxie/instructions.md` — a plain-English list of what it should do each day. **Edit it**; that file *is* the agent.
+2. **The brain** (bring your own Anthropic key) — set `MOXIE_API_KEY` in a `.env` file and ask it things: `moxie ask "can I afford £120 trainers this month?"`. Answers are grounded in **the money picture** — real income, committed subscriptions, and what's genuinely left this month (`moxie budget` shows the same figures; balance appears once a bank is linked). It states figures and trade-offs and lets you decide — it's not a financial adviser and won't pretend to be. Its standing orders live in `~/.moxie/instructions.md` — a plain-English list of what it should do each day. **Edit it**; that file *is* the agent.
 3. **The Telegram channel** (optional) — `moxie telegram` runs a bot you can text like a PA, plus a daily loop that re-scans and messages you *only* when there's something new to decide. Decisions are remembered — skip something once and Moxie won't nag you about it for 60 days.
 
 ```bash

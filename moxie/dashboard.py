@@ -99,7 +99,18 @@ class Dash:
                          else "live" if self.config.live else "drafts"),
             },
             "bank": self._bank_status(),
+            "money": self._money(),
         }
+
+    def _money(self) -> "dict | None":
+        from .snapshot import snapshot_from_store
+        if not self.store.load_transactions():
+            return None
+        s = snapshot_from_store(self.store)
+        return {"currency": s["currency"], "income": s["monthly_income"],
+                "spent": s["spent_this_month"], "left": s["left_this_month"],
+                "committed": s["committed"], "balance": s["balance"],
+                "month": s["month"]}
 
     def _bank_status(self) -> dict:
         from .providers import BankLink
@@ -224,6 +235,8 @@ PAGE = """<!doctype html>
   <div class="card"><h3>Bank</h3><div class="big" id="bank"></div>
       <div class="muted" id="bank2"></div>
       <div style="margin-top:8px"><button onclick="syncBank()">sync now</button></div></div>
+  <div class="card"><h3>This month</h3><div class="big" id="money"></div>
+      <div class="muted" id="money2"></div></div>
 </div>
 
 <h2>Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
@@ -310,6 +323,15 @@ async function refresh(){
          : b.accounts+' account(s)'+(b.consent_days_left!=null ? ' · consent ~'+b.consent_days_left+'d left' : '')
            +(b.last_sync ? ' · synced '+b.last_sync.slice(0,16) : ''))
       : 'moxie connect truelayer · or stay no-cloud with --csv/--pdf';
+  const mo = s.money;
+  if(mo){
+    $('money').textContent = mo.currency + mo.left.toFixed(2) + ' left';
+    $('money').className = 'big ' + (mo.left > 0 ? 'ok' : 'bad');
+    $('money2').textContent = 'in ~'+mo.currency+mo.income.toFixed(0)
+        +' · spent '+mo.currency+mo.spent.toFixed(0)
+        +' · committed '+mo.currency+mo.committed.toFixed(0)
+        +(mo.balance!=null ? ' · balance '+mo.currency+mo.balance.toFixed(0) : '');
+  } else { $('money').textContent = '—'; $('money2').textContent = 'import data first'; }
 
   const f = await api('/api/findings');
   $('findings').innerHTML = f.length ? f.map((a,i) =>
