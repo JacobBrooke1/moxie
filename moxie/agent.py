@@ -44,6 +44,9 @@ class Agent:
                     continue
             actions.append(action)
         self.last_suppressed = suppressed
+        # Disputes get their receipt attached as evidence (Phase 3).
+        from .receipts import attach_evidence
+        attach_evidence(actions, self.store.load_receipts())
         self.store.clear_actions()
         for action in actions:
             self.store.save_action(action)

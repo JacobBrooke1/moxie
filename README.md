@@ -41,7 +41,7 @@ Look at who already touches your money:
 
 ## What it does
 
-- 🧾 **Receipt vault** — auto-extract receipts from email; snap a photo of a paper receipt → OCR → filed, searchable, encrypted, local.
+- 🧾 **Receipt vault** — `moxie receipt photo.jpg` (local Tesseract OCR — images never leave your machine) or `moxie receipt --email` (read-only IMAP scan). Parsed, filed, matched to transactions, and **attached to disputes as evidence automatically**.
 - 🔎 **Finds problems** — zombie subscriptions, duplicate/wrong charges, missing refunds, gouge renewals.
 - ✅ **Acts — with your consent** — drafts the cancellation/dispute, shows it to you (editable), and sends it **only** when you approve *and* `MOXIE_LIVE=true`. Default is drafts-only. Receipt attached as proof.
 - 📮 **Three action tiers** — email from *your own* mailbox (SMTP), guided deep-links (Moxie shows the exact cancel page + clicks; you click), and per-merchant browser automation (optional, double-gated, sandboxed).

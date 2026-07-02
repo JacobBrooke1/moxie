@@ -146,6 +146,46 @@ def cmd_budget(args):
     print(format_snapshot(snapshot_from_store(store)))
 
 
+def cmd_receipt(args):
+    from .receipts import ingest_email_receipts, match_receipt, ocr_receipt
+    config, store, audit = _ctx()
+
+    if args.list or (not args.image and not args.email):
+        receipts = store.load_receipts()
+        if not receipts:
+            print("No receipts filed yet.  moxie receipt photo.jpg  or  moxie receipt --email")
+            return
+        for r in receipts:
+            print(f"  {r.date}  {r.merchant:24} {r.amount:>9.2f}  [{r.source}] {r.id}")
+        return
+
+    txns = store.load_transactions()
+    new = []
+    if args.image:
+        try:
+            new.append(ocr_receipt(args.image))
+        except RuntimeError as e:
+            raise SystemExit(f"❌ {e}")
+    if args.email:
+        try:
+            new += ingest_email_receipts(config)
+        except RuntimeError as e:
+            raise SystemExit(f"❌ {e}")
+
+    for r in new:
+        store.save_receipt(r)
+        match = match_receipt(r, txns)
+        matched = f" → matches {match.merchant} on {match.date}" if match else ""
+        audit.append("receipt_filed", {"merchant": r.merchant, "amount": r.amount,
+                                       "source": r.source,
+                                       "matched": bool(match)})
+        print(f"🧾 Filed: {r.merchant} {r.amount:.2f} ({r.date}, {r.source}){matched}")
+    if not new:
+        print("Nothing new found.")
+    else:
+        print("\nReceipts become evidence: disputes attach them automatically.")
+
+
 def cmd_connect(args):
     from .providers import BankLink, get_provider
     config, store, audit = _ctx()
@@ -349,6 +389,13 @@ def main(argv=None):
 
     p = sub.add_parser("budget", help="this month's money picture: in / out / left")
     p.set_defaults(func=cmd_budget)
+
+    p = sub.add_parser("receipt", help="file receipts: photo OCR (local) or email scan (read-only)")
+    p.add_argument("image", nargs="?", help="photo of a paper receipt (needs [ocr] extra)")
+    p.add_argument("--email", action="store_true",
+                   help="scan your mailbox read-only via IMAP (MOXIE_IMAP_* in .env)")
+    p.add_argument("--list", action="store_true", help="list filed receipts")
+    p.set_defaults(func=cmd_receipt)
 
     p = sub.add_parser("telegram", help="run the Telegram bot + daily loop (needs TELEGRAM_BOT_TOKEN)")
     p.set_defaults(func=cmd_telegram)
