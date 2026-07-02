@@ -20,7 +20,6 @@ Do not expose it to the open internet; it holds your keys.
 from __future__ import annotations
 
 import json
-import threading
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

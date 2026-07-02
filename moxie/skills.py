@@ -14,7 +14,7 @@ with X / dispute with Y", each carrying its own success rate.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 

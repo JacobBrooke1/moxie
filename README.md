@@ -8,6 +8,7 @@
 
 *Moxie doesn't care about a company's excuses. It just gets your money back — and asks you first, every time.*
 
+[![CI](https://github.com/JacobBrooke1/moxie/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobBrooke1/moxie/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status: early scaffold](https://img.shields.io/badge/status-early%20scaffold-orange.svg)](#status)
 [![Local-first](https://img.shields.io/badge/local--first-yes-brightgreen.svg)](#privacy--security)

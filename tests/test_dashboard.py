@@ -6,7 +6,7 @@ import urllib.request
 import pytest
 
 from moxie.config import Config
-from moxie.dashboard import Dash, _update_env_file, serve
+from moxie.dashboard import _update_env_file, serve
 from moxie.models import Transaction
 from moxie.storage import Store
 from moxie.vault import AuditLog

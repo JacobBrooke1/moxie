@@ -27,8 +27,22 @@ ocr = ["pytesseract>=0.3.10", "Pillow>=10.0"]  # photo receipts (local OCR)
 browser = ["playwright>=1.40"]  # tier-3 browser automation (run sandboxed!)
 dev = ["pytest>=7.0"]
 
+[project.urls]
+Homepage = "https://github.com/JacobBrooke1/moxie"
+Issues = "https://github.com/JacobBrooke1/moxie/issues"
+Security = "https://github.com/JacobBrooke1/moxie/blob/main/SECURITY.md"
+
 [project.scripts]
 moxie = "moxie.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["moxie*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# E = pycodestyle errors, F = pyflakes. Keep it lean; this isn't a style war.
+select = ["E", "F"]
+ignore = ["E501"]  # long lines: docstrings and drafts read better unwrapped

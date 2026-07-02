@@ -1,0 +1,34 @@
+# Publishes moxie-agent to PyPI when a version tag (v0.1.0 …) is pushed.
+#
+# One-time setup (maintainer): create the project on PyPI and add a Trusted
+# Publisher for this repo/workflow (PyPI → project → Publishing), OR set a
+# PYPI_API_TOKEN secret and swap the publish step's comment below.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing (no long-lived token needed)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test first — never ship red
+        run: |
+          pip install -e ".[dev]"
+          pytest -q
+      - name: Build sdist + wheel
+        run: |
+          pip install build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Trusted publishing by default. Token alternative:
+        # with: { password: "${{ secrets.PYPI_API_TOKEN }}" }

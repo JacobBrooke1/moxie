@@ -126,7 +126,7 @@ class Bot:
             if not txns:
                 return ("No transactions on file. On your computer run:\n"
                         "  moxie scan --csv statement.csv   (or --pdf statement.pdf)")
-            actions = self.agent.scan(txns)
+            self.agent.scan(txns)
             note = (f"\n({self.agent.last_suppressed} old finding(s) stayed snoozed — "
                     "you already decided on them)") if self.agent.last_suppressed else ""
             return f"Re-checked {len(txns)} transactions.{note}\n\n" + self._findings_text()

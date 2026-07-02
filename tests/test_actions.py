@@ -6,9 +6,8 @@ The invariants under test are the brand:
   * live email goes through the injected transport with the draft the user saw
   * failures come back as honest results, never fake "sent"
 """
-import pytest
 
-from moxie.actions import (BrowserChannel, DeeplinkChannel, EmailChannel,
+from moxie.actions import (BrowserChannel, EmailChannel,
                            execute_action, parse_draft, skill_steps)
 from moxie.agent import Agent
 from moxie.config import Config
