@@ -129,6 +129,14 @@ Most money actions are **one-way** — you can't cleanly un-cancel a subscriptio
 
 ---
 
+## Run it 24/7
+
+```bash
+moxie serve            # dashboard + Telegram bot + daily loop, one process
+```
+
+The daily loop re-scans every morning and pings you only when there's something new to decide. **A Mac mini at home is the ideal host** — always-on, and your bank data never leaves a machine you own. systemd/launchd units and a Dockerfile ship in [`deploy/`](deploy/); the full guide is [docs/HOSTING.md](docs/HOSTING.md).
+
 ## Moxie Dash — the control plane
 
 ```bash

@@ -1,0 +1,26 @@
+# Moxie as a systemd *user* service (Linux VPS or home server).
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/moxie.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now moxie
+#   loginctl enable-linger $USER      # keep it running after logout
+#
+# Logs:  journalctl --user -u moxie -f
+[Unit]
+Description=Moxie — the consent-first money agent (dashboard + Telegram + daily loop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# pipx/pip --user puts `moxie` here; adjust if yours differs (`which moxie`)
+ExecStart=%h/.local/bin/moxie serve
+Restart=always
+RestartSec=10
+# secrets & config come from ~/.moxie/.env (loaded by Moxie itself) or the
+# OS keychain via `moxie secret set` — never hardcode them in this unit.
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

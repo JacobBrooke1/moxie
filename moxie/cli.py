@@ -327,6 +327,12 @@ def cmd_dashboard(args):
     run_dashboard(config, store, audit, port=args.port)
 
 
+def cmd_serve(args):
+    from .serve import run_serve
+    config, store, audit = _ctx()
+    run_serve(config, store, audit, port=args.port)
+
+
 def cmd_log(args):
     config, store, audit = _ctx()
     entries = audit.entries()
@@ -505,6 +511,10 @@ def main(argv=None):
     p = sub.add_parser("dashboard", help="run Moxie Dash, the local control panel (127.0.0.1)")
     p.add_argument("--port", type=int, default=8484)
     p.set_defaults(func=cmd_dashboard)
+
+    p = sub.add_parser("serve", help="run everything 24/7: dashboard + Telegram + daily loop")
+    p.add_argument("--port", type=int, default=8484)
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("log", help="show the tamper-evident audit log")
     p.set_defaults(func=cmd_log)

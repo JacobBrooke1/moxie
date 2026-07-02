@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Moxie on a Mac mini (the ideal always-on host — your data never leaves
+     a machine you own). Install:
+
+       cp deploy/com.moxie.serve.plist ~/Library/LaunchAgents/
+       launchctl load -w ~/Library/LaunchAgents/com.moxie.serve.plist
+
+     Adjust ProgramArguments if `which moxie` says somewhere else.
+     Logs land in ~/.moxie/serve.log. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.moxie.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/moxie</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/moxie.serve.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/moxie.serve.log</string>
+</dict>
+</plist>
