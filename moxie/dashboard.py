@@ -98,7 +98,18 @@ class Dash:
                 "mode": ("kill" if self.config.kill_engaged
                          else "live" if self.config.live else "drafts"),
             },
+            "bank": self._bank_status(),
         }
+
+    def _bank_status(self) -> dict:
+        from .providers import BankLink
+        status = BankLink(self.config).status()
+        status["last_sync"] = self.store.get_meta("last_bank_sync")
+        return status
+
+    def bank_sync(self) -> dict:
+        from .providers import sync
+        return sync(self.config, self.store, self.audit)
 
     def findings(self) -> list:
         actions = [a for a in self.store.load_actions() if a.status == "proposed"]
@@ -210,6 +221,9 @@ PAGE = """<!doctype html>
       <div class="muted" id="audit2"></div></div>
   <div class="card"><h3>Mode</h3><div class="big" id="mode"></div>
       <div class="muted" id="mode2"></div></div>
+  <div class="card"><h3>Bank</h3><div class="big" id="bank"></div>
+      <div class="muted" id="bank2"></div>
+      <div style="margin-top:8px"><button onclick="syncBank()">sync now</button></div></div>
 </div>
 
 <h2>Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
@@ -288,6 +302,14 @@ async function refresh(){
   $('mode').className = 'big ' + (m.mode==='kill' ? 'bad' : (m.mode==='live' ? 'warn' : 'ok'));
   $('mode2').textContent = m.mode==='kill' ? 'moxie kill --release to resume'
       : (m.mode==='live' ? 'approved actions really send' : 'nothing sends — set MOXIE_LIVE=true');
+  const b = s.bank || {linked:false};
+  $('bank').textContent = b.linked ? (b.needs_reauth ? 're-consent' : b.provider) : 'not linked';
+  $('bank').className = 'big ' + (b.linked ? (b.needs_reauth ? 'bad' : 'ok') : 'warn');
+  $('bank2').textContent = b.linked
+      ? (b.needs_reauth ? 'consent expired — run: moxie connect '+b.provider
+         : b.accounts+' account(s)'+(b.consent_days_left!=null ? ' · consent ~'+b.consent_days_left+'d left' : '')
+           +(b.last_sync ? ' · synced '+b.last_sync.slice(0,16) : ''))
+      : 'moxie connect truelayer · or stay no-cloud with --csv/--pdf';
 
   const f = await api('/api/findings');
   $('findings').innerHTML = f.length ? f.map((a,i) =>
@@ -313,6 +335,8 @@ async function skip(id){
   toast(r.error || ('Skipped '+r.merchant+' — remembered for 60 days')); refresh(); }
 async function rescan(){ const r = await api('/api/rescan', {});
   toast(r.error || ('Re-scanned: '+r.found+' finding(s), '+r.suppressed+' snoozed')); refresh(); }
+async function syncBank(){ const r = await api('/api/bank/sync', {});
+  toast(r.error || ('Synced '+r.transactions+' transaction(s) from '+r.provider)); refresh(); }
 async function save(kv){ const r = await api('/api/setup', kv);
   toast(r.error || ('Saved: '+r.saved.join(', '))); refresh(); }
 async function detect(){ const r = await api('/api/telegram/detect', {});
@@ -349,6 +373,27 @@ def make_handler(dash: Dash):
                 self._json(dash.status())
             elif self.path == "/api/findings":
                 self._json(dash.findings())
+            elif self.path.startswith("/callback"):
+                # OAuth landing for bank consent: show the code to paste into
+                # `moxie connect` — this page never stores or logs it.
+                query = urllib.parse.urlparse(self.path).query
+                code = urllib.parse.parse_qs(query).get("code", [""])[0]
+                body = ("<!doctype html><meta charset='utf-8'>"
+                        "<body style='font:16px system-ui;padding:40px'>"
+                        "<h2>🦡 Bank consent received</h2>"
+                        + (f"<p>Paste this code into <code>moxie connect</code>:</p>"
+                           f"<pre style='background:#eee;padding:12px'>{code}</pre>"
+                           if code else
+                           "<p>No code in the URL — if your provider redirects "
+                           "without one (GoCardless/Plaid), just return to the "
+                           "terminal and press Enter.</p>")
+                        + "<p>You can close this tab.</p></body>")
+                data = body.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
             else:
                 self._json({"error": "not found"}, 404)
 
@@ -367,6 +412,8 @@ def make_handler(dash: Dash):
                 self._json(dash.save_setup(form))
             elif self.path == "/api/telegram/detect":
                 self._json(dash.detect_chat())
+            elif self.path == "/api/bank/sync":
+                self._json(dash.bank_sync())
             else:
                 self._json({"error": "not found"}, 404)
 

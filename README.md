@@ -79,6 +79,17 @@ moxie scan --csv statement.csv    # any bank CSV export — headers auto-detecte
 moxie scan --pdf statement.pdf    # bank statement PDFs (NatWest-style; pip install pypdf)
 ```
 
+Or link your bank for automatic read-only imports — **your choice of provider**, bring your own (free) credentials:
+
+```bash
+moxie connect truelayer     # UK default (NatWest etc.; free sandbox at console.truelayer.com)
+moxie connect gocardless    # most generous free tier (bankaccountdata.gocardless.com)
+moxie connect plaid         # strong US coverage (dashboard.plaid.com)
+moxie sync                  # pull fresh transactions + balances any time
+```
+
+Honesty note: every aggregator is a cloud third party. *You* hold the provider account (Moxie the project runs no servers), access is read-only AIS — Moxie cannot move money by construction — and CSV/PDF remains the fully no-cloud path. UK consents lapse ~90 days; `moxie doctor` and the dashboard tell you when to re-consent.
+
 **Going live** (optional — everything works drafts-only without this): approving an action really sends it only when you flip the flag *and* configure your own mailbox:
 
 ```bash

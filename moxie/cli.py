@@ -134,6 +134,60 @@ def cmd_ask(args):
     print(brain.ask(question, store.load_transactions(), store.load_actions()))
 
 
+def cmd_connect(args):
+    from .providers import BankLink, get_provider
+    config, store, audit = _ctx()
+
+    if getattr(args, "banks", False):
+        provider = get_provider(args.provider, config)
+        if not hasattr(provider, "list_banks"):
+            print(f"{args.provider} doesn't need a bank id.")
+            return
+        for b in provider.list_banks():
+            print(f"  {b['id']:32}  {b['name']}")
+        return
+
+    provider = get_provider(args.provider, config)
+    link = BankLink(config)
+
+    print(f"🏦 Linking via {provider.name} (read-only — Moxie can never move money).")
+    started = provider.start_link()
+    if started.get("error"):
+        print(f"   {started['error']}")
+        return
+    print(f"\n   1. Open:  {started['url']}\n   2. {started['hint']}\n")
+    try:
+        code = input("   Paste code (or press Enter if none): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n   Cancelled — nothing linked.")
+        return
+    try:
+        state = provider.complete_link(code, started.get("state", {}))
+    except Exception as e:
+        print(f"   ❌ Link failed: {e}")
+        return
+    link.save(state)
+    audit.append("bank_linked", {"provider": provider.name,
+                                 "accounts": len(state.get("accounts", []))})
+    print(f"   ✅ Linked {len(state.get('accounts', []))} account(s). Syncing…")
+    cmd_sync(args)
+
+
+def cmd_sync(args):
+    from .providers import sync
+    config, store, audit = _ctx()
+    out = sync(config, store, audit)
+    if out.get("error"):
+        print(f"❌ {out['error']}")
+        raise SystemExit(1)
+    print(f"✅ Synced {out['transactions']} transaction(s) from {out['provider']}.")
+    for b in out.get("balances", []):
+        cur = b.get("currency", "£")
+        print(f"   {b['account']}: {cur}{b.get('current') if b.get('current') is not None else '?'}"
+              + (f" ({cur}{b['available']} available)" if b.get("available") is not None else ""))
+    print("Run  moxie scan  to check the fresh data for problems.")
+
+
 def cmd_telegram(args):
     from .telegram import run_bot
     config, store, audit = _ctx()
@@ -214,6 +268,21 @@ def cmd_doctor(args):
     else:
         print("  [ok] Actions: drafts only (set MOXIE_LIVE=true to send for real)")
 
+    from .providers import BankLink
+    bank = BankLink(config).status()
+    if bank["linked"]:
+        left = bank.get("consent_days_left")
+        if bank.get("needs_reauth"):
+            print(f"  [ !] Bank: {bank['provider']} consent EXPIRED — run "
+                  f"`moxie connect {bank['provider']}` to re-consent")
+        else:
+            extra = f", consent ~{left}d left" if left is not None else ""
+            print(f"  [ok] Bank: {bank['provider']} linked "
+                  f"({bank['accounts']} account(s){extra})")
+    else:
+        print("  [ -] Bank: not linked (optional — `moxie connect truelayer` "
+              "or stay no-cloud with --csv/--pdf)")
+
     txns = store.load_transactions()
     print(f"  [{'ok' if txns else ' -'}] Transactions on file: {len(txns)}")
 
@@ -252,6 +321,15 @@ def main(argv=None):
     p = sub.add_parser("kill", help="engage the kill switch (force drafts-only)")
     p.add_argument("--release", action="store_true", help="release the kill switch")
     p.set_defaults(func=cmd_kill)
+
+    p = sub.add_parser("connect", help="link a bank read-only via a provider you choose")
+    p.add_argument("provider", help="truelayer (UK default) | gocardless (free tier) | plaid")
+    p.add_argument("--banks", action="store_true",
+                   help="list bank institution ids (gocardless)")
+    p.set_defaults(func=cmd_connect)
+
+    p = sub.add_parser("sync", help="pull fresh transactions + balances from the linked bank")
+    p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("ask", help="ask the brain a money question (needs MOXIE_API_KEY)")
     p.add_argument("question", nargs="+", help='e.g.  moxie ask "can I afford £120 trainers?"')

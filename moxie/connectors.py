@@ -182,25 +182,6 @@ def import_csv(path: str, currency: "str | None" = None) -> "list[Transaction]":
     return txns
 
 
-class OpenBankingConnector:
-    """Read-only bank data via an open-banking provider (bring your own credentials).
-
-    Provider-agnostic by design: TrueLayer is the first planned implementation
-    (UK/EU coverage, open-banking-native); the interface should also fit
-    Enable Banking, Yapily, or Plaid. In every case the user authenticates in
-    the provider's own UI — credentials never touch the agent — and access is
-    read-only. Moxie cannot move money by construction.
-
-    TODO: implement TrueLayer first (TRUELAYER_CLIENT_ID / TRUELAYER_CLIENT_SECRET).
-    Not implemented in the scaffold.
-    """
-
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError(
-            "Open-banking connector is a stub — bring-your-own provider credentials "
-            "(TrueLayer planned first). See docs/HOW_IT_WORKS.md."
-        )
-
-
-# Backwards-compatible alias (the spec originally named Plaid).
-PlaidConnector = OpenBankingConnector
+# Live open-banking providers (TrueLayer / GoCardless / Plaid) moved to
+# moxie/providers.py — `moxie connect <provider>` then `moxie sync`.
+# This module stays the no-cloud path: CSV (here) and PDF (statements.py).
