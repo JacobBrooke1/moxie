@@ -1,0 +1,352 @@
+"""Moxie Dash -- the local control plane. Stdlib only.
+
+    moxie dashboard          # -> http://127.0.0.1:8484
+
+The dashboard is Moxie's *trusted surface* (think OpenClaw's Claw Dash or the
+Hermes status page, but money-shaped):
+
+- heartbeat, brain, Telegram, and data status at a glance
+- findings with approve / skip (same Trust Vault pipeline, channel="dashboard")
+- SENSITIVE SETUP LIVES HERE: API keys and Telegram pairing are entered on
+  this page and written to ~/.moxie/.env -- never over chat
+- guided Telegram setup: paste the BotFather token, message your bot once,
+  click "detect" and Moxie finds your chat id for pairing
+
+Security: binds to 127.0.0.1 ONLY. If Moxie runs on a remote box (a VPS, a
+Mac mini in a cupboard), reach the dashboard through an SSH tunnel:
+    ssh -L 8484:127.0.0.1:8484 you@your-box
+Do not expose it to the open internet; it holds your keys.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from . import __version__
+from .agent import Agent
+from .brain import Brain
+
+ENV_KEYS = ("MOXIE_API_KEY", "TELEGRAM_BOT_TOKEN", "MOXIE_TELEGRAM_CHAT_ID")
+
+
+def _update_env_file(path, updates: dict) -> None:
+    """Rewrite KEY=value lines in ~/.moxie/.env, preserving everything else."""
+    lines = []
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    seen = set()
+    out = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip() if "=" in line else None
+        if key in updates:
+            out.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+class Dash:
+    """State + API logic, separated from HTTP plumbing for testability."""
+
+    def __init__(self, config, store, audit):
+        self.config = config
+        self.store = store
+        self.audit = audit
+        self.agent = Agent(config, store, audit)
+
+    # ---- status ------------------------------------------------------------
+    def status(self) -> dict:
+        ok, bad = self.audit.verify()
+        entries = self.audit.entries()
+        proposed = [a for a in self.store.load_actions() if a.status == "proposed"]
+        cur = getattr(proposed[0], "currency", "£") if proposed else "£"
+        return {
+            "version": __version__,
+            "home": str(self.config.home),
+            "heartbeat": {
+                "alive": True,
+                "last_event": entries[-1]["event"] if entries else None,
+                "last_event_ts": entries[-1]["ts"] if entries else None,
+                "last_daily_scan": self.store.get_meta("last_auto_scan"),
+            },
+            "brain": {
+                "ready": Brain(self.config).available,
+                "model": self.config.model,
+                "offline": self.config.offline,
+            },
+            "telegram": {
+                "token_set": bool(self.config.telegram_token),
+                "paired_chat": self.config.telegram_chat_id,
+            },
+            "data": {
+                "transactions": len(self.store.load_transactions()),
+                "findings": len(proposed),
+                "est_savings": round(sum(a.est_savings for a in proposed), 2),
+                "currency": cur,
+            },
+            "audit": {"intact": ok, "entries": len(entries), "first_bad": bad},
+        }
+
+    def findings(self) -> list:
+        actions = [a for a in self.store.load_actions() if a.status == "proposed"]
+        actions.sort(key=lambda a: (-a.est_savings, a.merchant))
+        return [
+            {"id": a.id, "kind": a.kind, "merchant": a.merchant,
+             "description": a.description, "est_savings": a.est_savings,
+             "currency": getattr(a, "currency", "£"), "draft": a.draft}
+            for a in actions
+        ]
+
+    def resolve(self, action_id: str, approved: bool) -> dict:
+        result = self.agent.resolve(action_id, approved, channel="dashboard")
+        if not result:
+            return {"error": "not found or already handled"}
+        action, outcome, note = result
+        return {"merchant": action.merchant, "outcome": outcome, "note": note}
+
+    def rescan(self) -> dict:
+        txns = self.store.load_transactions()
+        if not txns:
+            return {"error": "no transactions on file — run moxie scan --csv/--pdf first"}
+        actions = self.agent.scan(txns)
+        return {"found": len(actions), "suppressed": self.agent.last_suppressed}
+
+    def save_setup(self, form: dict) -> dict:
+        import os
+        updates = {k: v.strip() for k, v in form.items() if k in ENV_KEYS and v and v.strip()}
+        if not updates:
+            return {"error": "nothing to save"}
+        _update_env_file(self.config.home / ".env", updates)
+        os.environ.update(updates)          # take effect without restart
+        self.audit.append("setup_saved", {"keys": sorted(updates)})  # names only, never values
+        return {"saved": sorted(updates)}
+
+    def detect_chat(self) -> dict:
+        """Guided pairing: after you message your bot once, find your chat id."""
+        token = self.config.telegram_token
+        if not token:
+            return {"error": "save a TELEGRAM_BOT_TOKEN first"}
+        try:
+            with urllib.request.urlopen(
+                f"https://api.telegram.org/bot{token}/getUpdates", timeout=15
+            ) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            return {"error": f"couldn't reach Telegram: {e}"}
+        chats = {}
+        for u in data.get("result", []):
+            chat = (u.get("message") or {}).get("chat") or {}
+            if chat.get("id"):
+                chats[chat["id"]] = chat.get("first_name") or chat.get("title") or "?"
+        if not chats:
+            return {"error": "no messages yet — open Telegram and send your bot any message, then retry"}
+        chat_id, name = list(chats.items())[-1]
+        return {"chat_id": str(chat_id), "name": name}
+
+
+PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Moxie Dash</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --fg:#e6edf3;
+          --dim:#8b949e; --orange:#e8862e; --green:#3fb950; --red:#f85149; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--fg);
+         font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:28px; }
+  h1 { font-size:22px; margin-bottom:4px; } h1 span{color:var(--orange);}
+  .sub { color:var(--dim); margin-bottom:24px; font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+          gap:14px; margin-bottom:26px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h3 { font-size:12px; text-transform:uppercase; letter-spacing:.08em;
+             color:var(--dim); margin-bottom:8px; }
+  .big { font-size:20px; font-weight:600; }
+  .ok{color:var(--green)} .warn{color:var(--orange)} .bad{color:var(--red)}
+  .muted{color:var(--dim); font-size:13px;}
+  h2 { font-size:15px; margin:26px 0 10px; color:var(--orange); }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:9px 10px; border-top:1px solid var(--line); vertical-align:top; }
+  button { background:transparent; border:1px solid var(--line); color:var(--fg);
+           border-radius:7px; padding:5px 12px; cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--orange); color:var(--orange); }
+  button.primary { background:var(--orange); border-color:var(--orange); color:#0d1117; font-weight:600; }
+  input { background:var(--bg); border:1px solid var(--line); color:var(--fg);
+          border-radius:7px; padding:7px 10px; width:100%; font-size:13px; }
+  label { font-size:12px; color:var(--dim); display:block; margin:10px 0 4px; }
+  .setup { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+  #toast { position:fixed; bottom:20px; right:20px; background:var(--card);
+           border:1px solid var(--orange); border-radius:8px; padding:10px 16px;
+           display:none; font-size:13px; }
+  .note { font-size:12px; color:var(--dim); margin-top:16px; }
+</style></head><body>
+<h1>🦡 <span>Moxie</span> Dash</h1>
+<div class="sub">The trusted surface. Keys and pairing live here — never over chat. · v<span id="ver"></span></div>
+
+<div class="grid">
+  <div class="card"><h3>Heartbeat</h3><div class="big ok" id="hb">●</div>
+      <div class="muted" id="hb2"></div></div>
+  <div class="card"><h3>Brain</h3><div class="big" id="brain"></div>
+      <div class="muted" id="brain2"></div></div>
+  <div class="card"><h3>Telegram</h3><div class="big" id="tg"></div>
+      <div class="muted" id="tg2"></div></div>
+  <div class="card"><h3>Data</h3><div class="big" id="data"></div>
+      <div class="muted" id="data2"></div></div>
+  <div class="card"><h3>Audit trail</h3><div class="big" id="audit"></div>
+      <div class="muted" id="audit2"></div></div>
+</div>
+
+<h2>Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
+<table id="findings"></table>
+
+<h2>Setup</h2>
+<div class="setup">
+  <div class="card">
+    <h3>Brain — bring your own key</h3>
+    <label>Anthropic API key (console.anthropic.com)</label>
+    <input id="k_api" type="password" placeholder="sk-ant-…">
+    <div style="margin-top:12px"><button class="primary" onclick="save({MOXIE_API_KEY:val('k_api')})">Save key</button></div>
+  </div>
+  <div class="card">
+    <h3>Telegram — pair your chat</h3>
+    <label>1 · Bot token from @BotFather</label>
+    <input id="k_tok" type="password" placeholder="123456:ABC…">
+    <div style="margin-top:8px"><button onclick="save({TELEGRAM_BOT_TOKEN:val('k_tok')})">Save token</button></div>
+    <label>2 · Message your bot anything, then:</label>
+    <button onclick="detect()">Detect my chat id</button>
+    <span class="muted" id="detected"></span>
+    <div style="margin-top:8px"><button class="primary" id="pairbtn" style="display:none"
+      onclick="save({MOXIE_TELEGRAM_CHAT_ID:window._chat})">Pair this chat</button></div>
+    <div class="muted" style="margin-top:8px">3 · Run <code>moxie telegram</code> and text your PA.</div>
+  </div>
+</div>
+
+<div class="note">Dashboard binds to 127.0.0.1 only. On a remote host use an SSH tunnel:
+<code>ssh -L 8484:127.0.0.1:8484 you@host</code>. Moxie never moves money; actions are drafts you approve.</div>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const val = id => $(id).value;
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
+  setTimeout(()=>t.style.display='none', 4000); }
+async function api(path, body){
+  const opts = body ? {method:'POST', body: JSON.stringify(body)} : {};
+  const r = await fetch(path, opts); return r.json(); }
+
+async function refresh(){
+  const s = await api('/api/status');
+  $('ver').textContent = s.version;
+  $('hb2').textContent = 'last event: ' + (s.heartbeat.last_event||'—') +
+      (s.heartbeat.last_daily_scan ? ' · daily scan: '+s.heartbeat.last_daily_scan : '');
+  $('brain').textContent = s.brain.ready ? 'ready' : (s.brain.offline ? 'offline mode' : 'no key');
+  $('brain').className = 'big ' + (s.brain.ready ? 'ok' : 'warn');
+  $('brain2').textContent = s.brain.model;
+  $('tg').textContent = s.telegram.paired_chat ? 'paired' : (s.telegram.token_set ? 'token set' : 'not set up');
+  $('tg').className = 'big ' + (s.telegram.paired_chat ? 'ok' : 'warn');
+  $('tg2').textContent = s.telegram.paired_chat ? ('chat '+s.telegram.paired_chat) : 'see Setup below';
+  $('data').textContent = s.data.transactions + ' txns';
+  $('data2').textContent = s.data.findings + ' finding(s) · ~' + s.data.currency + s.data.est_savings + '/yr';
+  $('audit').textContent = s.audit.intact ? 'verified' : 'TAMPERED';
+  $('audit').className = 'big ' + (s.audit.intact ? 'ok' : 'bad');
+  $('audit2').textContent = s.audit.entries + ' hash-chained entries';
+
+  const f = await api('/api/findings');
+  $('findings').innerHTML = f.length ? f.map((a,i) =>
+    '<tr><td class="muted">'+(i+1)+'</td><td>'+a.description+
+    '</td><td style="white-space:nowrap">~'+a.currency+a.est_savings.toFixed(2)+'/yr</td>'+
+    '<td style="white-space:nowrap"><button onclick="approve(\\''+a.id+'\\')">approve</button> '+
+    '<button onclick="skip(\\''+a.id+'\\')">skip</button></td></tr>').join('')
+    : '<tr><td class="muted">Nothing waiting on you. Import data with: moxie scan --csv / --pdf</td></tr>';
+}
+async function approve(id){
+  const f = (await api('/api/findings')).find(x=>x.id===id);
+  if(!confirm('About to act on:\\n\\n'+f.description+'\\n\\n'+
+     (f.draft?'Draft:\\n'+f.draft+'\\n\\n':'')+'This CANNOT be undone once sent. Approve?')) return;
+  const r = await api('/api/resolve', {id, approved:true});
+  toast(r.error || (r.outcome.toUpperCase()+': '+r.merchant+' — '+r.note)); refresh(); }
+async function skip(id){
+  const r = await api('/api/resolve', {id, approved:false});
+  toast(r.error || ('Skipped '+r.merchant+' — remembered for 60 days')); refresh(); }
+async function rescan(){ const r = await api('/api/rescan', {});
+  toast(r.error || ('Re-scanned: '+r.found+' finding(s), '+r.suppressed+' snoozed')); refresh(); }
+async function save(kv){ const r = await api('/api/setup', kv);
+  toast(r.error || ('Saved: '+r.saved.join(', '))); refresh(); }
+async function detect(){ const r = await api('/api/telegram/detect', {});
+  if(r.error){ toast(r.error); return; }
+  window._chat = r.chat_id;
+  $('detected').textContent = ' found: '+r.name+' ('+r.chat_id+')';
+  $('pairbtn').style.display = 'inline-block'; }
+refresh(); setInterval(refresh, 15000);
+</script></body></html>"""
+
+
+def make_handler(dash: Dash):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):  # keep the console quiet
+            pass
+
+        def _json(self, obj, code=200):
+            body = json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/" or self.path.startswith("/index"):
+                body = PAGE.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/api/status":
+                self._json(dash.status())
+            elif self.path == "/api/findings":
+                self._json(dash.findings())
+            else:
+                self._json({"error": "not found"}, 404)
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                form = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                form = {}
+            if self.path == "/api/resolve":
+                self._json(dash.resolve(form.get("id", ""), bool(form.get("approved"))))
+            elif self.path == "/api/rescan":
+                self._json(dash.rescan())
+            elif self.path == "/api/setup":
+                self._json(dash.save_setup(form))
+            elif self.path == "/api/telegram/detect":
+                self._json(dash.detect_chat())
+            else:
+                self._json({"error": "not found"}, 404)
+
+    return Handler
+
+
+def serve(config, store, audit, port: int = 8484, host: str = "127.0.0.1"):
+    dash = Dash(config, store, audit)
+    server = ThreadingHTTPServer((host, port), make_handler(dash))
+    return server
+
+
+def run_dashboard(config, store, audit, port: int = 8484):
+    server = serve(config, store, audit, port=port)
+    print(f"🦡 Moxie Dash: http://127.0.0.1:{port}   (Ctrl-C to stop)")
+    print("   Remote box? Tunnel it:  ssh -L {0}:127.0.0.1:{0} you@host".format(port))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()

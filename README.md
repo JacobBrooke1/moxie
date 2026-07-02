@@ -101,6 +101,16 @@ Most money actions are **one-way** — you can't cleanly un-cancel a subscriptio
 
 ---
 
+## Moxie Dash — the control plane
+
+```bash
+moxie dashboard        # → http://127.0.0.1:8484
+```
+
+A local status page in the OpenClaw / Hermes tradition, but money-shaped: **heartbeat**, **brain**, **Telegram**, **data**, and **audit-chain** status at a glance, findings with approve/skip (same Trust Vault pipeline), and — most importantly — **the setup home**: paste your API key and BotFather token here, click *detect my chat id*, and it walks you through Telegram pairing. Keys are written to `~/.moxie/.env` on the machine Moxie runs on; the audit log records *that* setup changed, never the secrets themselves.
+
+It binds to `127.0.0.1` only. Running Moxie on a Mac mini or a VPS? Reach the dash through an SSH tunnel (`ssh -L 8484:127.0.0.1:8484 you@host`) — never expose it to the open internet.
+
 ## The brain & the Telegram channel
 
 Moxie has three layers, and you can stop at any of them:

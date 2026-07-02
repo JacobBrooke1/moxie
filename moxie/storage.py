@@ -22,7 +22,9 @@ class Store:
     def __init__(self, path: "Path | str"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(self.path))
+        # check_same_thread=False: the dashboard serves from worker threads;
+        # every write commits immediately, so cross-thread reuse is safe here.
+        self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self._init()
 
     def _init(self) -> None:

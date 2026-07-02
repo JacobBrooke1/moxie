@@ -116,6 +116,12 @@ def cmd_telegram(args):
     run_bot(config, store, audit)
 
 
+def cmd_dashboard(args):
+    from .dashboard import run_dashboard
+    config, store, audit = _ctx()
+    run_dashboard(config, store, audit, port=args.port)
+
+
 def cmd_log(args):
     config, store, audit = _ctx()
     entries = audit.entries()
@@ -216,6 +222,10 @@ def main(argv=None):
 
     p = sub.add_parser("telegram", help="run the Telegram bot + daily loop (needs TELEGRAM_BOT_TOKEN)")
     p.set_defaults(func=cmd_telegram)
+
+    p = sub.add_parser("dashboard", help="run Moxie Dash, the local control panel (127.0.0.1)")
+    p.add_argument("--port", type=int, default=8484)
+    p.set_defaults(func=cmd_dashboard)
 
     p = sub.add_parser("log", help="show the tamper-evident audit log")
     p.set_defaults(func=cmd_log)
