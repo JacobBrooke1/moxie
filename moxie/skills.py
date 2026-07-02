@@ -11,9 +11,18 @@ agentskills.io `SKILL.md` standard): one folder per skill, each containing a
 This parser is dependency-free (no PyYAML needed) so the core stays stdlib-only.
 The library is the compounding asset — an open, growing set of "how to cancel
 with X / dispute with Y", each carrying its own success rate.
+
+Frontmatter keys a skill can set (all optional beyond name):
+  merchant       exact merchant name, or "*" for bank-route skills
+  action_type    cancel_subscription | dispute_charge | chase_refund | negotiate
+  channel        email | deeplink | browser  — how to act for this merchant
+  url            the exact page (deeplink), email: the verified support address
+Body blocks: numbered steps (human guidance), ```moxie-steps``` (browser
+verbs), ```moxie-draft``` (an email template with {merchant} placeholders).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,12 +95,43 @@ class SkillRegistry:
         return self
 
     def find(self, merchant: str = None, action_type: str = None) -> "list[Skill]":
+        """Best matches first: exact merchant beats the `merchant: "*"`
+        wildcards (bank-route skills like 'dispute via NatWest')."""
         out = self.skills
-        if merchant:
-            out = [s for s in out if s.merchant.lower() == merchant.lower()]
         if action_type:
             out = [s for s in out if s.action_type == action_type]
+        if merchant:
+            exact = [s for s in out if s.merchant.lower() == merchant.lower()]
+            wild = [s for s in out if s.merchant == "*"]
+            out = exact + wild
         return out
+
+
+_DRAFT_BLOCK = re.compile(r"```moxie-draft\s*\n(.*?)```", re.S)
+
+
+class _Defaults(dict):
+    def __missing__(self, key):          # unknown {placeholder} stays literal
+        return "{" + key + "}"
+
+
+def draft_template(skill) -> "str | None":
+    """A ```moxie-draft``` block in the skill body overrides the default
+    draft. Placeholders: {merchant} {amount} {currency} {date}."""
+    m = _DRAFT_BLOCK.search(skill.instructions or "")
+    return m.group(1).strip() if m else None
+
+
+def render_draft(skill, action) -> "str | None":
+    template = draft_template(skill)
+    if not template:
+        return None
+    return template.format_map(_Defaults(
+        merchant=action.merchant,
+        amount=f"{action.amount:.2f}",
+        currency=getattr(action, "currency", "£"),
+        date="",
+    ))
 
 
 def default_registry(config) -> SkillRegistry:

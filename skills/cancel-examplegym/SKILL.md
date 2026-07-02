@@ -2,6 +2,8 @@
 name: Cancel ExampleGym membership
 merchant: ExampleGym
 action_type: cancel_subscription
+channel: email
+email: member-services@examplegym.com
 success_rate: 0.82
 ---
 

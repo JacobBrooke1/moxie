@@ -47,6 +47,9 @@ class Agent:
         # Disputes get their receipt attached as evidence (Phase 3).
         from .receipts import attach_evidence
         attach_evidence(actions, self.store.load_receipts())
+        # Merchant know-how shapes the plan before you ever see it (Phase 6).
+        for action in actions:
+            self._shape_with_skill(action)
         self.store.clear_actions()
         for action in actions:
             self.store.save_action(action)
@@ -57,8 +60,11 @@ class Agent:
         return actions
 
     # --- helpers --------------------------------------------------------------
-    def _skill_for(self, action):
-        """The best-matching SKILL.md for this merchant + action type, if any."""
+    def _skill_for(self, action, routes_only=False):
+        """The best-matching SKILL.md for this merchant + action type.
+        Exact-merchant skills are ROUTES (they may change the channel and the
+        draft); `merchant: "*"` skills are ADVICE (bank-route playbooks) and
+        never hijack how the action is delivered — routes_only skips them."""
         if self.skills is None:
             try:
                 from .skills import default_registry
@@ -68,6 +74,8 @@ class Agent:
         if not self.skills:
             return None
         matches = self.skills.find(merchant=action.merchant, action_type=action.kind)
+        if routes_only:
+            matches = [s for s in matches if s.merchant != "*"]
         return matches[0] if matches else None
 
     def _receipt_for(self, action):
@@ -77,6 +85,44 @@ class Agent:
             if r.id == action.evidence_receipt_id:
                 return r
         return None
+
+    def _shape_with_skill(self, action) -> None:
+        """Apply the merchant's SKILL.md to the proposal: pick the channel,
+        fix the support address, apply the draft template, and surface the
+        escalation playbook — all BEFORE approval, so what you approve is
+        what runs. Wildcard (bank-route) skills only add their playbook."""
+        skill = self._skill_for(action)
+        if not skill:
+            return
+        from .actions import skill_steps
+        from .skills import render_draft
+
+        steps = skill_steps(skill)
+        if skill.merchant == "*":
+            if steps:  # advice only — e.g. "merchant first, then chargeback"
+                playbook = " → ".join(steps[:4])
+                action.rationale = (action.rationale + f" Playbook ({skill.name}): "
+                                    + playbook).strip()
+            return
+
+        if skill.channel:
+            action.channel = skill.channel
+        templated = render_draft(skill, action)
+        if templated:
+            action.draft = templated
+        elif skill.email and action.draft.lower().startswith("to:"):
+            head, _, rest = action.draft.partition("\n")
+            action.draft = f"To: {skill.email}\n{rest}"
+
+        if action.channel == "deeplink" and skill.url:
+            guide = [f"Guided — open: {skill.url}"]
+            guide += [f"  {i}. {s}" for i, s in enumerate(steps, 1)]
+            guide.append("(You do the final click — nothing is sent by Moxie.)")
+            action.draft = "\n".join(guide)
+        elif steps:
+            playbook = " → ".join(steps[:4])
+            action.rationale = (action.rationale + f" Playbook ({skill.name}): "
+                                + playbook).strip()
 
     # --- the Vault pipeline for a single action ------------------------------
     def _run_one(self, action, approved_or_fn, channel):
@@ -107,11 +153,19 @@ class Agent:
             self.audit.append("action_skipped", {"action": action.id, "channel": channel})
             return (action, "skipped", "you declined")
 
-        skill = self._skill_for(action)
+        # Only route-class skills (exact merchant) steer delivery; wildcard
+        # bank-route advice already did its job in the rationale.
+        skill = self._skill_for(action, routes_only=True)
         result = execute_action(
             action, self.config,
             skill=skill, receipt=self._receipt_for(action), channels=self.channels,
         )
+        if skill:  # the library learns which know-how gets exercised
+            self.store.bump_skill(skill.name, "used")
+            if result.get("sent"):
+                self.store.bump_skill(skill.name, "sent")
+            elif result.get("error"):
+                self.store.bump_skill(skill.name, "failed")
 
         if result.get("error") and not result.get("sent"):
             action.status = "failed"

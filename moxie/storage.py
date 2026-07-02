@@ -102,3 +102,28 @@ class Store:
     def get_meta(self, key: str) -> "str | None":
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row[0] if row else None
+
+    # --- skill stats (how often each SKILL.md was used, and how it went) ---
+    def bump_skill(self, name: str, outcome: str) -> None:
+        """outcome: 'used' on every execution; plus 'sent' or 'failed'."""
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS skill_stats "
+            "(name TEXT PRIMARY KEY, used INTEGER DEFAULT 0, "
+            " sent INTEGER DEFAULT 0, failed INTEGER DEFAULT 0)"
+        )
+        self.db.execute(
+            "INSERT INTO skill_stats (name) VALUES (?) "
+            "ON CONFLICT(name) DO NOTHING", (name,))
+        if outcome in ("used", "sent", "failed"):
+            self.db.execute(
+                f"UPDATE skill_stats SET {outcome} = {outcome} + 1 WHERE name = ?",
+                (name,))
+        self.db.commit()
+
+    def skill_stats(self) -> "dict[str, dict]":
+        try:
+            rows = self.db.execute(
+                "SELECT name, used, sent, failed FROM skill_stats").fetchall()
+        except Exception:
+            return {}
+        return {r[0]: {"used": r[1], "sent": r[2], "failed": r[3]} for r in rows}

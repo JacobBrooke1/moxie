@@ -275,18 +275,24 @@ def cmd_verify(args):
 
 
 def cmd_skills(args):
-    config = Config()
+    config, store, audit = _ctx()
     reg = SkillRegistry()
     for d in _skill_dirs(args, config):
         if Path(d).exists():
             reg.load_dir(d)
     if not reg.skills:
-        print("No skills found. Add one at  skills/<name>/SKILL.md  — see CONTRIBUTING.md.")
+        print("No skills found. Add one at  skills/<name>/SKILL.md  — see skills/README.md.")
         return
+    stats = store.skill_stats()
     print(f"{len(reg.skills)} skill(s):\n")
     for s in reg.skills:
-        rate = f"{s.success_rate:.0%}" if s.success_rate else "—"
-        print(f"  • {s.name}  [{s.action_type or '?'} @ {s.merchant or '?'}]  success≈{rate}")
+        st = stats.get(s.name, {})
+        used = (f"used {st['used']}×, {st.get('sent', 0)} sent"
+                + (f", {st['failed']} failed" if st.get("failed") else "")
+                ) if st else "unused"
+        print(f"  • {s.name}  [{s.action_type or '?'} @ {s.merchant or '?'} "
+              f"via {s.channel or 'email'}]  {used}")
+    print("\nContribute know-how: skills/README.md — a folder + a SKILL.md is a PR.")
 
 
 def cmd_doctor(args):
