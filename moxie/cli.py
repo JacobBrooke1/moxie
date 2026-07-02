@@ -86,15 +86,39 @@ def cmd_review(args):
     if args.yes:
         print("⚠️  --yes: auto-approving every action (demo/testing only).\n")
 
+    if config.kill_engaged:
+        print("🛑 Kill switch engaged (~/.moxie/KILL) — everything stays a draft.\n")
+    elif config.live:
+        print("🔴 MOXIE_LIVE=true — approved actions WILL really send.\n")
+    else:
+        print("📝 Drafts mode (MOXIE_LIVE not set) — nothing will be sent.\n")
+
     results = Agent(config, store, audit).review(approve_fn=approve_fn)
     if not results:
         print("Nothing to review. Run  moxie scan  first.")
         return
 
     for action, outcome, note in results:
-        icon = {"executed": "✅", "skipped": "⏭️ ", "denied": "🚫"}.get(outcome, "•")
+        icon = {"executed": "✅", "sent": "📮", "skipped": "⏭️ ",
+                "denied": "🚫", "failed": "❌"}.get(outcome, "•")
         print(f"{icon} {outcome.upper()}: [{action.kind}] {action.merchant} — {note}")
     print("\nEvery step recorded. See  moxie log  /  moxie verify.")
+
+
+def cmd_kill(args):
+    config, store, audit = _ctx()
+    if args.release:
+        if config.kill_path.exists():
+            config.kill_path.unlink()
+            audit.append("kill_switch", {"engaged": False})
+            print("🟢 Kill switch released. MOXIE_LIVE (if set) is honoured again.")
+        else:
+            print("Kill switch wasn't engaged.")
+        return
+    config.kill_path.write_text("engaged\n", encoding="utf-8")
+    audit.append("kill_switch", {"engaged": True})
+    print("🛑 Kill switch ENGAGED — every action is drafts-only until you run "
+          "`moxie kill --release`, whatever MOXIE_LIVE says.")
 
 
 def cmd_ask(args):
@@ -181,6 +205,15 @@ def cmd_doctor(args):
     else:
         print("  [ -] Telegram: no TELEGRAM_BOT_TOKEN (optional — see README)")
 
+    if config.kill_engaged:
+        print("  [ !] Actions: KILL SWITCH engaged — drafts only (moxie kill --release)")
+    elif config.live:
+        smtp_ok = all(config.smtp.get(k) for k in ("host", "user", "password"))
+        print("  [ok] Actions: LIVE — approved actions really send"
+              + ("" if smtp_ok else "  (but SMTP isn't configured; email sends will refuse)"))
+    else:
+        print("  [ok] Actions: drafts only (set MOXIE_LIVE=true to send for real)")
+
     txns = store.load_transactions()
     print(f"  [{'ok' if txns else ' -'}] Transactions on file: {len(txns)}")
 
@@ -215,6 +248,10 @@ def main(argv=None):
     p = sub.add_parser("review", help="approve or skip each proposed fix")
     p.add_argument("--yes", action="store_true", help="auto-approve everything (demo/testing only)")
     p.set_defaults(func=cmd_review)
+
+    p = sub.add_parser("kill", help="engage the kill switch (force drafts-only)")
+    p.add_argument("--release", action="store_true", help="release the kill switch")
+    p.set_defaults(func=cmd_kill)
 
     p = sub.add_parser("ask", help="ask the brain a money question (needs MOXIE_API_KEY)")
     p.add_argument("question", nargs="+", help='e.g.  moxie ask "can I afford £120 trainers?"')

@@ -93,6 +93,12 @@ class Dash:
                 "currency": cur,
             },
             "audit": {"intact": ok, "entries": len(entries), "first_bad": bad},
+            "actions": {
+                "live": self.config.live,
+                "kill": self.config.kill_engaged,
+                "mode": ("kill" if self.config.kill_engaged
+                         else "live" if self.config.live else "drafts"),
+            },
         }
 
     def findings(self) -> list:
@@ -105,12 +111,14 @@ class Dash:
             for a in actions
         ]
 
-    def resolve(self, action_id: str, approved: bool) -> dict:
-        result = self.agent.resolve(action_id, approved, channel="dashboard")
+    def resolve(self, action_id: str, approved: bool, edited_draft=None) -> dict:
+        result = self.agent.resolve(action_id, approved, channel="dashboard",
+                                    edited_draft=edited_draft)
         if not result:
             return {"error": "not found or already handled"}
         action, outcome, note = result
-        return {"merchant": action.merchant, "outcome": outcome, "note": note}
+        return {"merchant": action.merchant, "outcome": outcome, "note": note,
+                "reference": getattr(action, "reference", "")}
 
     def rescan(self) -> dict:
         txns = self.store.load_transactions()
@@ -201,6 +209,8 @@ PAGE = """<!doctype html>
       <div class="muted" id="data2"></div></div>
   <div class="card"><h3>Audit trail</h3><div class="big" id="audit"></div>
       <div class="muted" id="audit2"></div></div>
+  <div class="card"><h3>Mode</h3><div class="big" id="mode"></div>
+      <div class="muted" id="mode2"></div></div>
 </div>
 
 <h2>Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
@@ -229,8 +239,25 @@ PAGE = """<!doctype html>
 </div>
 
 <div class="note">Dashboard binds to 127.0.0.1 only. On a remote host use an SSH tunnel:
-<code>ssh -L 8484:127.0.0.1:8484 you@host</code>. Moxie never moves money; actions are drafts you approve.</div>
+<code>ssh -L 8484:127.0.0.1:8484 you@host</code>. Moxie never moves money; every action needs your approval,
+and nothing sends unless MOXIE_LIVE=true.</div>
 <div id="toast"></div>
+
+<div id="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6);
+     align-items:center; justify-content:center; z-index:10;">
+  <div class="card" style="max-width:640px; width:92%;">
+    <h3>Approve this action?</h3>
+    <div id="m_desc" style="margin:8px 0"></div>
+    <label>The draft (edit freely — it goes out under your name)</label>
+    <textarea id="m_draft" rows="10" style="width:100%; background:var(--bg);
+      border:1px solid var(--line); color:var(--fg); border-radius:7px;
+      padding:8px; font:13px/1.4 ui-monospace,monospace;"></textarea>
+    <div class="muted" style="margin:8px 0">⚠️ This cannot be undone once sent.
+      In drafts mode (MOXIE_LIVE off) approving finalises the draft; nothing sends.</div>
+    <button class="primary" id="m_go">Approve</button>
+    <button id="m_cancel" style="margin-left:8px">Cancel</button>
+  </div>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -257,6 +284,11 @@ async function refresh(){
   $('audit').textContent = s.audit.intact ? 'verified' : 'TAMPERED';
   $('audit').className = 'big ' + (s.audit.intact ? 'ok' : 'bad');
   $('audit2').textContent = s.audit.entries + ' hash-chained entries';
+  const m = s.actions || {mode:'drafts'};
+  $('mode').textContent = m.mode==='kill' ? 'KILL SWITCH' : (m.mode==='live' ? 'LIVE' : 'drafts');
+  $('mode').className = 'big ' + (m.mode==='kill' ? 'bad' : (m.mode==='live' ? 'warn' : 'ok'));
+  $('mode2').textContent = m.mode==='kill' ? 'moxie kill --release to resume'
+      : (m.mode==='live' ? 'approved actions really send' : 'nothing sends — set MOXIE_LIVE=true');
 
   const f = await api('/api/findings');
   $('findings').innerHTML = f.length ? f.map((a,i) =>
@@ -268,10 +300,15 @@ async function refresh(){
 }
 async function approve(id){
   const f = (await api('/api/findings')).find(x=>x.id===id);
-  if(!confirm('About to act on:\\n\\n'+f.description+'\\n\\n'+
-     (f.draft?'Draft:\\n'+f.draft+'\\n\\n':'')+'This CANNOT be undone once sent. Approve?')) return;
-  const r = await api('/api/resolve', {id, approved:true});
-  toast(r.error || (r.outcome.toUpperCase()+': '+r.merchant+' — '+r.note)); refresh(); }
+  const box = $('modal');
+  $('m_desc').textContent = f.description;
+  $('m_draft').value = f.draft || '';
+  $('m_go').onclick = async () => {
+    box.style.display='none';
+    const r = await api('/api/resolve', {id, approved:true, draft: $('m_draft').value});
+    toast(r.error || (r.outcome.toUpperCase()+': '+r.merchant+' — '+r.note)); refresh(); };
+  $('m_cancel').onclick = () => { box.style.display='none'; };
+  box.style.display='flex'; }
 async function skip(id){
   const r = await api('/api/resolve', {id, approved:false});
   toast(r.error || ('Skipped '+r.merchant+' — remembered for 60 days')); refresh(); }
@@ -323,7 +360,8 @@ def make_handler(dash: Dash):
             except json.JSONDecodeError:
                 form = {}
             if self.path == "/api/resolve":
-                self._json(dash.resolve(form.get("id", ""), bool(form.get("approved"))))
+                self._json(dash.resolve(form.get("id", ""), bool(form.get("approved")),
+                                        edited_draft=form.get("draft")))
             elif self.path == "/api/rescan":
                 self._json(dash.rescan())
             elif self.path == "/api/setup":

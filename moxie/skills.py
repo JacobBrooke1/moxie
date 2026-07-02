@@ -26,6 +26,9 @@ class Skill:
     success_rate: float = 0.0
     instructions: str = ""         # the markdown body
     path: str = ""
+    channel: str = ""              # email | deeplink | browser — how to act for this merchant
+    url: str = ""                  # deep-link target (channel: deeplink)
+    email: str = ""                # verified support address (channel: email)
 
 
 def _parse_frontmatter(text: str):
@@ -75,6 +78,9 @@ class SkillRegistry:
                     success_rate=rate,
                     instructions=body,
                     path=str(skill_md),
+                    channel=meta.get("channel", ""),
+                    url=meta.get("url", ""),
+                    email=meta.get("email", ""),
                 )
             )
         return self
@@ -86,3 +92,18 @@ class SkillRegistry:
         if action_type:
             out = [s for s in out if s.action_type == action_type]
         return out
+
+
+def default_registry(config) -> SkillRegistry:
+    """Skills from the usual places: MOXIE_SKILLS, ./skills, and the user's
+    workspace (~/.moxie/workspace/skills) — same lookup the CLI uses."""
+    import os
+    reg = SkillRegistry()
+    dirs = [
+        os.environ.get("MOXIE_SKILLS") or "skills",
+        str(config.home / "workspace" / "skills"),
+    ]
+    for d in dirs:
+        if d and Path(d).exists():
+            reg.load_dir(d)
+    return reg

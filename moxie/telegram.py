@@ -138,9 +138,16 @@ class Bot:
             self.pending[str(chat_id)] = action.id
             cur = getattr(action, "currency", "$")
             draft = f"\n\nDraft:\n{action.draft}" if action.draft else ""
+            if self.config.kill_engaged:
+                mode = "🛑 Kill switch engaged — approving produces a draft, nothing sends."
+            elif self.config.live:
+                mode = "🔴 LIVE mode — this WILL really be sent."
+            else:
+                mode = "📝 Drafts mode — approving finalises the draft; nothing is sent."
             return (f"About to act on: {action.description} "
-                    f"(saves ~{cur}{action.est_savings:.2f}/yr){draft}\n\n"
-                    "⚠️ This cannot be undone once sent. Reply YES to confirm.")
+                    f"(saves ~{cur}{action.est_savings:.2f}/yr){draft}\n\n{mode}\n"
+                    "⚠️ This cannot be undone once sent. Reply YES to confirm.\n"
+                    "(Want to edit the draft first? Use the dashboard on your computer.)")
 
         if low == "yes" and str(chat_id) in self.pending:
             action_id = self.pending.pop(str(chat_id))
@@ -148,9 +155,12 @@ class Bot:
             if not result:
                 return "That one's already been handled."
             action, outcome, note = result
-            return (f"✅ {outcome.upper()}: {action.merchant} — {note}.\n"
-                    "Logged in the tamper-evident audit trail (moxie log). "
-                    "Reminder: drafts only in this version — nothing was sent.")
+            icon = {"sent": "📮", "executed": "✅", "failed": "❌"}.get(outcome, "•")
+            msg = (f"{icon} {outcome.upper()}: {action.merchant} — {note}.\n"
+                   "Logged in the tamper-evident audit trail (moxie log).")
+            if outcome == "executed" and getattr(action, "channel", "email") != "deeplink":
+                msg += " Drafts only — nothing was sent (MOXIE_LIVE is off)."
+            return msg
 
         if low.startswith("/skip"):
             action = self._nth(text)

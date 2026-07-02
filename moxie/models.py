@@ -44,5 +44,8 @@ class ProposedAction:
     draft: str = ""                       # the email/letter we would send
     currency: str = "$"
     evidence_receipt_id: Optional[str] = None
-    status: str = "proposed"              # proposed | approved | skipped | executed | denied
+    # proposed | skipped | denied | executed (drafted, dry-run) | sent (live) | failed
+    status: str = "proposed"
+    channel: str = "email"                # email | deeplink | browser (skill can override)
+    reference: str = ""                   # message-id / URL / confirmation once acted
     id: str = field(default_factory=_id)

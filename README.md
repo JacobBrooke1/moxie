@@ -42,7 +42,8 @@ Look at who already touches your money:
 
 - 🧾 **Receipt vault** — auto-extract receipts from email; snap a photo of a paper receipt → OCR → filed, searchable, encrypted, local.
 - 🔎 **Finds problems** — zombie subscriptions, duplicate/wrong charges, missing refunds, gouge renewals.
-- ✅ **Acts — with your consent** — drafts the cancellation/dispute, shows it to you, and only sends it when you approve. Receipt attached as proof.
+- ✅ **Acts — with your consent** — drafts the cancellation/dispute, shows it to you (editable), and sends it **only** when you approve *and* `MOXIE_LIVE=true`. Default is drafts-only. Receipt attached as proof.
+- 📮 **Three action tiers** — email from *your own* mailbox (SMTP), guided deep-links (Moxie shows the exact cancel page + clicks; you click), and per-merchant browser automation (optional, double-gated, sandboxed).
 - 🛡️ **Trust Vault** — deny-by-default policy engine, preview/simulate, approval gates, and a **hash-chained, tamper-evident audit log**.
 - 🧩 **Community skill library** — reusable "how to cancel with X / dispute with Y" skills, each carrying its own success rate.
 - 🔒 **Local-first & BYO key** — runs on your machine with your own LLM API key, or fully offline with a local model.
@@ -76,6 +77,21 @@ Ready for your real data? Both paths are local and read-only — nothing leaves 
 moxie scan --csv statement.csv    # any bank CSV export — headers auto-detected
 moxie scan --pdf statement.pdf    # bank statement PDFs (NatWest-style; pip install pypdf)
 ```
+
+**Going live** (optional — everything works drafts-only without this): approving an action really sends it only when you flip the flag *and* configure your own mailbox:
+
+```bash
+# .env — your own email account (use an app password, never your real one)
+MOXIE_SMTP_HOST=smtp.gmail.com
+MOXIE_SMTP_USER=you@gmail.com
+MOXIE_SMTP_PASSWORD=your-app-password
+MOXIE_LIVE=true                   # default: false = drafts only
+
+moxie review                      # 🔴 live: an approved cancel actually emails
+moxie kill                        # panic button: force drafts-only until --release
+```
+
+Cancellations that work better on the merchant's website use **guided deep-links**: Moxie shows the exact URL and clicks (from the merchant's skill) and *you* do the final click — no passwords, no CAPTCHA fights.
 
 > ⚠️ **Status:** early scaffold. The Trust Vault (audit log, policy, approvals) is implemented; Plaid, OCR, and email ingestion are stubbed with clear `TODO`s. **Do not use with real financial data until the items in [SECURITY.md](SECURITY.md) are done.**
 

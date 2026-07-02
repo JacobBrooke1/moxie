@@ -75,4 +75,14 @@ The features could ship as an OpenClaw/Hermes skill — those platforms already 
 - **Stdlib-only core.** The vault (policy, approval, audit) has zero third-party dependencies — nothing to supply-chain-attack, and the whole trust layer is a few hundred readable lines.
 - **Local-first.** Receipts, transactions, and the audit log live in `~/.moxie` on your machine.
 - **Bring your own key.** Your LLM API key or a fully local model — Moxie has no cloud, so there's nothing to trust but the code.
-- **Dry-run scaffold.** Execution currently drafts (dry-run) rather than sends; Plaid, OCR, and email ingestion are stubbed with clear TODOs. See [SECURITY.md](../SECURITY.md) for what must be done before real financial data.
+- **Drafts by default.** Execution is a dry-run draft unless `MOXIE_LIVE=true` — and even then every action still needs your per-action approval, and a `KILL` file in `~/.moxie` (created by `moxie kill`) forces drafts-only no matter what. See [SECURITY.md](../SECURITY.md) for what must be done before real financial data.
+
+## The action tiers (Phase 1)
+
+When an action *is* approved and `MOXIE_LIVE=true`, delivery goes through one of three channels, picked by the merchant's `SKILL.md` (`moxie/actions.py`):
+
+1. **Email** — sent from *your own* mailbox over SMTP (your address + an app password). Legitimate, deliverable, no impersonation. The draft you approved — including the `To:` line — is exactly what goes out, and you can edit it first.
+2. **Guided deep-link** — Moxie gives you the exact cancel URL and the clicks; *you* do the final click. Zero passwords, zero side effects, immune to CAPTCHAs and retention dark patterns. `sent` is honestly `false` here — the human acted, not the agent.
+3. **Browser automation** — a driver (Playwright, optional extra) walks the skill's `moxie-steps` end-to-end, pausing for a human at 2FA/CAPTCHA steps. The riskiest tier, so it needs a *second* explicit opt-in (`MOXIE_BROWSER_OK=true`) on top of `MOXIE_LIVE`, and should run sandboxed (Docker).
+
+Every delivery result — sent or failed, with its message-id / URL / confirmation reference — lands in the audit log. A failed send is recorded as `failed`, never dressed up as success.

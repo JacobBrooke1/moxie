@@ -10,6 +10,18 @@ never overriding real environment variables):
   MOXIE_TELEGRAM_CHAT_ID  your chat id; the bot answers this chat ONLY
   MOXIE_SCAN_HOUR         daily scan hour for `moxie telegram` (default: 9)
   MOXIE_HOME              data directory (default: ~/.moxie)
+
+Live-action gates (see moxie/actions.py):
+
+  MOXIE_LIVE              "true" = approved actions really send; default false
+                          (drafts only). A `KILL` file in ~/.moxie overrides
+                          this to drafts no matter what (`moxie kill`).
+  MOXIE_SMTP_HOST/PORT/USER/PASSWORD/FROM  your own mailbox for the email
+                          channel (use an app password)
+  MOXIE_SMTP_SSL          "true" = implicit TLS; default STARTTLS
+  MOXIE_SMTP_BCC_SELF     default true -- keep a copy of every send
+  MOXIE_EMAIL_OVERRIDE_TO reroute all sends to this address (testing)
+  MOXIE_BROWSER_OK        "true" = allow the browser-automation tier
 """
 from __future__ import annotations
 
@@ -96,3 +108,42 @@ class Config:
             return int(os.environ.get("MOXIE_SCAN_HOUR", "9"))
         except ValueError:
             return 9
+
+    # --- live-action gates (Phase 1) -------------------------------------
+    @staticmethod
+    def _truthy(name: str) -> bool:
+        return os.environ.get(name, "").lower() in ("1", "true", "yes")
+
+    @property
+    def live(self) -> bool:
+        """MOXIE_LIVE=true means approved actions really send. Default: drafts."""
+        return self._truthy("MOXIE_LIVE")
+
+    @property
+    def kill_path(self) -> Path:
+        return self.home / "KILL"
+
+    @property
+    def kill_engaged(self) -> bool:
+        """The kill switch: a KILL file in ~/.moxie forces drafts-only."""
+        return self.kill_path.exists()
+
+    @property
+    def browser_ok(self) -> bool:
+        """Extra explicit opt-in for the browser-automation tier."""
+        return self._truthy("MOXIE_BROWSER_OK")
+
+    @property
+    def smtp(self) -> dict:
+        """The user's own mailbox for the email channel (app password!)."""
+        return {
+            "host": os.environ.get("MOXIE_SMTP_HOST", ""),
+            "port": os.environ.get("MOXIE_SMTP_PORT", "587"),
+            "user": os.environ.get("MOXIE_SMTP_USER", ""),
+            "password": os.environ.get("MOXIE_SMTP_PASSWORD", ""),
+            "from": os.environ.get("MOXIE_SMTP_FROM", ""),
+            "ssl": self._truthy("MOXIE_SMTP_SSL"),
+            "bcc_self": os.environ.get("MOXIE_SMTP_BCC_SELF", "true").lower()
+                        not in ("0", "false", "no"),
+            "override_to": os.environ.get("MOXIE_EMAIL_OVERRIDE_TO", ""),
+        }
