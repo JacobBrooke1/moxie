@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.svg" alt="Moxie the honey badger" width="360">
+
 # 🦡 Moxie
 
 **The open-source money agent that *acts* — and never without your say-so.**
@@ -96,6 +98,24 @@ Nothing in the right-hand column happens without passing the **Trust Vault**. Fo
 ### Why preview-and-approve, not "undo"
 
 Most money actions are **one-way** — you can't cleanly un-cancel a subscription or un-send a dispute. So Moxie's safety is *before* the action (simulate → approve), not a promise to reverse it after. That's the whole reason consent is mandatory.
+
+---
+
+## The brain & the Telegram channel
+
+Moxie has three layers, and you can stop at any of them:
+
+1. **Rules** (no key needed) — deterministic, explainable detectors. Everything above runs on these.
+2. **The brain** (bring your own Anthropic key) — set `MOXIE_API_KEY` in a `.env` file and ask it things: `moxie ask "can I afford £120 trainers this month?"`. It triages findings, flags false positives, and suggests alternatives for subscriptions you keep but barely use. Its standing orders live in `~/.moxie/instructions.md` — a plain-English list of what it should do each day. **Edit it**; that file *is* the agent.
+3. **The Telegram channel** (optional) — `moxie telegram` runs a bot you can text like a PA, plus a daily loop that re-scans and messages you *only* when there's something new to decide. Decisions are remembered — skip something once and Moxie won't nag you about it for 60 days.
+
+```bash
+# .env: TELEGRAM_BOT_TOKEN from @BotFather, then pair:
+moxie telegram        # message your bot; it replies with your chat id
+# put MOXIE_TELEGRAM_CHAT_ID=<that id> in .env, restart, done
+```
+
+Channel security (borrowed from OpenClaw's design): the bot is **paired to exactly one chat** and ignores everyone else; approvals are two-step (`/approve 2`, then `YES`); the brain never executes anything — every action still passes the Trust Vault; and sensitive setup (keys, bank links) only ever happens on your computer, never over chat.
 
 ---
 

@@ -1,7 +1,7 @@
 """Moxie command-line interface.
 
-Commands: init · scan · review · log · verify · skills · doctor
-The whole demo runs on bundled sample data with no external dependencies.
+Commands: init · scan · review · ask · telegram · log · verify · skills · doctor
+The demo runs on bundled sample data with no external dependencies.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import __version__
 from .agent import Agent
+from .brain import Brain, ensure_instructions
 from .config import Config
 from .connectors import import_csv
 from .sampledata import sample_receipts, sample_transactions
@@ -43,8 +44,10 @@ def cmd_init(args):
     (config.home / "workspace" / "skills").mkdir(parents=True, exist_ok=True)
     for receipt in sample_receipts():
         store.save_receipt(receipt)
+    instructions = ensure_instructions(config)
     audit.append("init", {"home": str(config.home)})
     print(f"🦡 Moxie initialized at {config.home}")
+    print(f"   Standing instructions: {instructions}  (edit me!)")
     print("Next:  moxie scan   then   moxie review")
 
 
@@ -58,8 +61,13 @@ def cmd_scan(args):
     else:
         txns, source = sample_transactions(), "built-in sample data"
 
-    actions = Agent(config, store, audit).scan(txns)
+    store.save_transactions(txns)
+    agent = Agent(config, store, audit)
+    actions = agent.scan(txns)
     print(f"Scanned {len(txns)} transactions from {source}.\n")
+    if agent.last_suppressed:
+        print(f"({agent.last_suppressed} finding(s) suppressed — you already decided; "
+              f"they'll stay quiet for a while.)\n")
     if not actions:
         print("✅ Nothing to fix. Nice.")
         return
@@ -87,6 +95,25 @@ def cmd_review(args):
         icon = {"executed": "✅", "skipped": "⏭️ ", "denied": "🚫"}.get(outcome, "•")
         print(f"{icon} {outcome.upper()}: [{action.kind}] {action.merchant} — {note}")
     print("\nEvery step recorded. See  moxie log  /  moxie verify.")
+
+
+def cmd_ask(args):
+    config, store, audit = _ctx()
+    brain = Brain(config)
+    if not brain.available:
+        print("The brain needs an API key: set MOXIE_API_KEY in your environment or a "
+              ".env file (bring your own Anthropic key), or set MOXIE_OFFLINE=true to "
+              "acknowledge rules-only mode.")
+        return
+    question = " ".join(args.question)
+    audit.append("ask", {"question": question[:200]})
+    print(brain.ask(question, store.load_transactions(), store.load_actions()))
+
+
+def cmd_telegram(args):
+    from .telegram import run_bot
+    config, store, audit = _ctx()
+    run_bot(config, store, audit)
 
 
 def cmd_log(args):
@@ -137,9 +164,19 @@ def cmd_doctor(args):
     if config.offline:
         print("  [ok] LLM mode: offline / local model")
     elif config.api_key:
-        print("  [ok] LLM: MOXIE_API_KEY set (bring-your-own key)")
+        print(f"  [ok] Brain: MOXIE_API_KEY set (model: {config.model})")
     else:
-        print("  [ !] LLM: no MOXIE_API_KEY and not offline — set a key or MOXIE_OFFLINE=true")
+        print("  [ !] Brain: no MOXIE_API_KEY and not offline — `moxie ask` and Telegram "
+              "questions won't work; set a key or MOXIE_OFFLINE=true")
+
+    if config.telegram_token:
+        paired = config.telegram_chat_id or "not paired — message the bot for your chat id"
+        print(f"  [ok] Telegram: token set (chat: {paired})")
+    else:
+        print("  [ -] Telegram: no TELEGRAM_BOT_TOKEN (optional — see README)")
+
+    txns = store.load_transactions()
+    print(f"  [{'ok' if txns else ' -'}] Transactions on file: {len(txns)}")
 
     ok, bad = audit.verify()
     print(f"  [ok] Audit log intact ({len(audit.entries())} entries)" if ok
@@ -172,6 +209,13 @@ def main(argv=None):
     p = sub.add_parser("review", help="approve or skip each proposed fix")
     p.add_argument("--yes", action="store_true", help="auto-approve everything (demo/testing only)")
     p.set_defaults(func=cmd_review)
+
+    p = sub.add_parser("ask", help="ask the brain a money question (needs MOXIE_API_KEY)")
+    p.add_argument("question", nargs="+", help='e.g.  moxie ask "can I afford £120 trainers?"')
+    p.set_defaults(func=cmd_ask)
+
+    p = sub.add_parser("telegram", help="run the Telegram bot + daily loop (needs TELEGRAM_BOT_TOKEN)")
+    p.set_defaults(func=cmd_telegram)
 
     p = sub.add_parser("log", help="show the tamper-evident audit log")
     p.set_defaults(func=cmd_log)

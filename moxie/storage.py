@@ -1,4 +1,8 @@
-"""Local SQLite store for proposed actions and receipts.
+"""Local SQLite store for actions, receipts, transactions, and decisions.
+
+Decisions are Moxie's memory: once you skip or act on a finding, it is
+remembered and not re-proposed while the snooze window lasts -- an agent
+that nags you daily with the same question gets uninstalled.
 
 NOTE: encryption-at-rest is a TODO before any real-data use (see SECURITY.md).
 Stdlib only.
@@ -6,11 +10,12 @@ Stdlib only.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import json
 import sqlite3
 from pathlib import Path
 
-from .models import ProposedAction, Receipt
+from .models import ProposedAction, Receipt, Transaction
 
 
 class Store:
@@ -23,6 +28,12 @@ class Store:
     def _init(self) -> None:
         self.db.execute("CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY, data TEXT)")
         self.db.execute("CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, data TEXT)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, data TEXT)")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS decisions "
+            "(merchant TEXT, kind TEXT, status TEXT, date TEXT, PRIMARY KEY (merchant, kind))"
+        )
+        self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
         self.db.commit()
 
     # --- actions ---
@@ -52,3 +63,40 @@ class Store:
     def load_receipts(self) -> "list[Receipt]":
         rows = self.db.execute("SELECT data FROM receipts").fetchall()
         return [Receipt(**json.loads(r[0])) for r in rows]
+
+    # --- transactions (latest import, so chat channels can reason later) ---
+    def save_transactions(self, txns: "list[Transaction]") -> None:
+        self.db.execute("DELETE FROM transactions")
+        self.db.executemany(
+            "INSERT INTO transactions (id, data) VALUES (?, ?)",
+            [(t.id, json.dumps(dataclasses.asdict(t))) for t in txns],
+        )
+        self.db.commit()
+
+    def load_transactions(self) -> "list[Transaction]":
+        rows = self.db.execute("SELECT data FROM transactions").fetchall()
+        return [Transaction(**json.loads(r[0])) for r in rows]
+
+    # --- decisions (Moxie's memory) ---
+    def save_decision(self, merchant: str, kind: str, status: str, date: "str | None" = None) -> None:
+        self.db.execute(
+            "REPLACE INTO decisions (merchant, kind, status, date) VALUES (?, ?, ?, ?)",
+            (merchant, kind, status, date or dt.date.today().isoformat()),
+        )
+        self.db.commit()
+
+    def get_decision(self, merchant: str, kind: str) -> "dict | None":
+        row = self.db.execute(
+            "SELECT status, date FROM decisions WHERE merchant = ? AND kind = ?",
+            (merchant, kind),
+        ).fetchone()
+        return {"status": row[0], "date": row[1]} if row else None
+
+    # --- meta ---
+    def set_meta(self, key: str, value: str) -> None:
+        self.db.execute("REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+        self.db.commit()
+
+    def get_meta(self, key: str) -> "str | None":
+        row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None

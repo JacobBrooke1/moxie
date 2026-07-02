@@ -1,0 +1,33 @@
+<svg viewBox="0 0 760 520" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <!-- Moxie: original honey badger mascot. MIT-licensed like the rest of the repo. -->
+  <g stroke="#E8862E" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <!-- silhouette -->
+    <path d="M694 260
+             q14 4 13 15 q-1 10 -15 11 q-15 1 -30 3
+             C 648 292 628 298 606 304
+             C 590 310 572 318 556 326
+             C 546 330 534 334 524 338
+             L 518 420
+             q-1 13 10 15 l22 4 q11 3 8 12 q-3 9 -15 8 l-30 -2 q-15 -1 -15 -16 l-2 -95
+             C 452 350 400 352 350 342
+             L 344 416
+             q-1 13 10 15 l22 5 q11 3 8 12 q-3 9 -15 8 l-30 -3 q-15 -1 -14 -16 l4 -97
+             C 300 338 250 330 200 320
+             C 162 332 130 352 108 376
+             q-13 13 -28 11 q-15 -3 -12 -19 q6 -32 34 -53 q25 -19 58 -26
+             C 168 258 192 216 240 190
+             C 300 162 380 158 452 170
+             C 500 178 540 188 570 198
+             C 590 205 606 212 622 220
+             C 648 232 672 248 694 260 Z"/>
+    <!-- mantle: pale back stripe, crown to rump -->
+    <path d="M600 226 C 564 206 512 190 452 182 C 386 172 310 178 258 202 C 226 218 204 244 196 270"
+          stroke-width="6"/>
+    <!-- ear, seated on the head slope -->
+    <path d="M604 238 q-1 -14 13 -16 q11 -2 15 9" stroke-width="7"/>
+    <!-- eye -->
+    <circle cx="646" cy="264" r="6.5" fill="#E8862E" stroke="none"/>
+  </g>
+  <line x1="150" y1="470" x2="640" y2="470" stroke="#E8862E" stroke-width="7"
+        stroke-linecap="round" stroke-dasharray="2 26"/>
+</svg>
