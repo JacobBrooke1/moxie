@@ -8,6 +8,12 @@ Moxie's three layers:
 The brain NEVER executes anything. It can only talk. Even a fully
 hallucinating model cannot act, because acting goes through the Trust Vault.
 
+Two ways to have a brain:
+  * bring your own Anthropic key (MOXIE_API_KEY), or
+  * fully offline via a local Ollama model: MOXIE_MODEL=ollama:llama3.1
+    (server at MOXIE_OLLAMA_URL, default http://localhost:11434). No key,
+    no cloud, same instructions, same guardrails.
+
 Your standing instructions live in ~/.moxie/instructions.md -- a plain list of
 what Moxie should do each day, in your own words. Edit it freely; the brain
 reads it on every call.
@@ -19,11 +25,13 @@ The system prompt pins transaction text as untrusted DATA.
 from __future__ import annotations
 
 import json
+import os
 import urllib.request
 from pathlib import Path
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+OLLAMA_DEFAULT_URL = "http://localhost:11434"
 
 DEFAULT_INSTRUCTIONS = """\
 # Moxie's standing instructions
@@ -89,10 +97,21 @@ def _fmt_findings(actions) -> str:
 class Brain:
     def __init__(self, config, transport=None):
         self.config = config
-        self._transport = transport or self._http
+        self._transport = transport or (
+            self._http_ollama if self.ollama_model else self._http)
+
+    @property
+    def ollama_model(self) -> "str | None":
+        """MOXIE_MODEL=ollama:<name> selects a local model. None otherwise."""
+        model = self.config.model
+        if model.lower().startswith("ollama:"):
+            return model.split(":", 1)[1] or "llama3.1"
+        return None
 
     @property
     def available(self) -> bool:
+        if self.ollama_model:
+            return True   # local model: no key needed, and offline IS the point
         return bool(self.config.api_key) and not self.config.offline
 
     # --- plumbing ---------------------------------------------------------
@@ -109,12 +128,40 @@ class Brain:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
+    def _http_ollama(self, payload: dict) -> dict:
+        base = os.environ.get("MOXIE_OLLAMA_URL", OLLAMA_DEFAULT_URL).rstrip("/")
+        req = urllib.request.Request(
+            base + "/api/chat",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"content-type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except OSError as e:
+            raise RuntimeError(
+                f"Ollama not reachable at {base} — is `ollama serve` running "
+                f"and the model pulled? (ollama pull {self.ollama_model})"
+            ) from e
+
     def _call(self, user_text: str) -> str:
         instructions = ensure_instructions(self.config).read_text(encoding="utf-8")
+        system = instructions + _GUARDRAILS
+        if self.ollama_model:
+            payload = {
+                "model": self.ollama_model,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_text},
+                ],
+            }
+            data = self._transport(payload)
+            return (data.get("message", {}) or {}).get("content", "").strip()
         payload = {
             "model": self.config.model,
             "max_tokens": 800,
-            "system": instructions + _GUARDRAILS,
+            "system": system,
             "messages": [{"role": "user", "content": user_text}],
         }
         data = self._transport(payload)

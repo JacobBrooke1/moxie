@@ -125,9 +125,10 @@ def cmd_ask(args):
     config, store, audit = _ctx()
     brain = Brain(config)
     if not brain.available:
-        print("The brain needs an API key: set MOXIE_API_KEY in your environment or a "
-              ".env file (bring your own Anthropic key), or set MOXIE_OFFLINE=true to "
-              "acknowledge rules-only mode.")
+        print("The brain needs a model: set MOXIE_API_KEY in .env (bring your own "
+              "Anthropic key), or go fully offline with a local model via "
+              "MOXIE_MODEL=ollama:llama3.1 (needs Ollama running), or set "
+              "MOXIE_OFFLINE=true to acknowledge rules-only mode.")
         return
     from .snapshot import snapshot_from_store
     question = " ".join(args.question)
@@ -297,13 +298,17 @@ def cmd_doctor(args):
     print(f"  [{'ok' if ok_py else ' X'}] Python {v.major}.{v.minor} (need ≥3.9; 3.11 recommended)")
     print(f"  [ok] Home: {config.home}")
 
-    if config.offline:
-        print("  [ok] LLM mode: offline / local model")
+    if config.model.lower().startswith("ollama:"):
+        print(f"  [ok] Brain: local Ollama model ({config.model}) — fully offline")
+    elif config.offline:
+        print("  [ok] LLM mode: offline (rules only — or set MOXIE_MODEL=ollama:… "
+              "for a local brain)")
     elif config.api_key:
         print(f"  [ok] Brain: MOXIE_API_KEY set (model: {config.model})")
     else:
         print("  [ !] Brain: no MOXIE_API_KEY and not offline — `moxie ask` and Telegram "
-              "questions won't work; set a key or MOXIE_OFFLINE=true")
+              "questions won't work; set a key, or MOXIE_MODEL=ollama:llama3.1, "
+              "or MOXIE_OFFLINE=true")
 
     if config.telegram_token:
         paired = config.telegram_chat_id or "not paired — message the bot for your chat id"
