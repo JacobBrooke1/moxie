@@ -450,6 +450,14 @@ def cmd_doctor(args):
 
 
 def main(argv=None):
+    # Windows consoles (cp1252) can't encode the badger — degrade to '?'
+    # instead of crashing. Everything else about the output is unchanged.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):
+            pass
+
     parser = argparse.ArgumentParser(
         prog="moxie",
         description="The open-source money agent that acts only with your approval.",
