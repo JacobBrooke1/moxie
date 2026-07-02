@@ -68,6 +68,13 @@ moxie doctor          # checks your setup: python, key, audit, skills
 
 The demo runs entirely on bundled sample data so you can see the consent-first loop end to end before connecting anything real.
 
+Ready for your real data? Both paths are local and read-only — nothing leaves your machine:
+
+```bash
+moxie scan --csv statement.csv    # any bank CSV export — headers auto-detected
+moxie scan --pdf statement.pdf    # bank statement PDFs (NatWest-style; pip install pypdf)
+```
+
 > ⚠️ **Status:** early scaffold. The Trust Vault (audit log, policy, approvals) is implemented; Plaid, OCR, and email ingestion are stubbed with clear `TODO`s. **Do not use with real financial data until the items in [SECURITY.md](SECURITY.md) are done.**
 
 ---

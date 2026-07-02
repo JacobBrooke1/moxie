@@ -50,7 +50,10 @@ def cmd_init(args):
 
 def cmd_scan(args):
     config, store, audit = _ctx()
-    if args.csv:
+    if getattr(args, "pdf", None):
+        from .statements import import_pdf
+        txns, source = import_pdf(args.pdf), args.pdf
+    elif args.csv:
         txns, source = import_csv(args.csv), args.csv
     else:
         txns, source = sample_transactions(), "built-in sample data"
@@ -162,7 +165,8 @@ def main(argv=None):
     p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("scan", help="find issues in your transactions")
-    p.add_argument("--csv", help="import a CSV (columns: date,merchant,amount,description)")
+    p.add_argument("--csv", help="import a bank CSV export (headers auto-detected)")
+    p.add_argument("--pdf", help="import a bank statement PDF (NatWest-style; needs pypdf)")
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("review", help="approve or skip each proposed fix")
