@@ -29,13 +29,16 @@ def server(ctx):
     srv.shutdown()
 
 
-def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
+def _get(url, headers=None):
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
 
 
-def _post(url, body):
-    req = urllib.request.Request(url, data=json.dumps(body).encode())
+def _post(url, body, headers=None, with_guard=True):
+    h = {"X-Moxie": "1"} if with_guard else {}   # the CSRF header the page JS sends
+    h.update(headers or {})
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=h)
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
 
@@ -88,6 +91,38 @@ def test_setup_writes_env_names_not_values_to_audit(server, ctx):
         assert not any("sk-test-123" in json.dumps(e) for e in audit.entries())  # never log secrets
     finally:
         os.environ.pop("MOXIE_API_KEY", None)   # don't leak into other tests
+
+
+def test_post_without_csrf_header_is_403(server):
+    import urllib.error
+    base, ctx = server
+    _seed(ctx)
+    try:
+        _post(base + "/api/rescan", {}, with_guard=False)
+        raise AssertionError("should have been blocked")
+    except urllib.error.HTTPError as e:
+        assert e.code == 403
+        assert "CSRF" in json.loads(e.read())["error"]
+
+
+def test_dash_token_locks_the_api(server, monkeypatch):
+    import urllib.error
+    base, ctx = server
+    monkeypatch.setenv("MOXIE_DASH_TOKEN", "shh-token")
+    try:
+        try:
+            _get(base + "/api/status")
+            raise AssertionError("should need the token")
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+        s = _get(base + "/api/status",
+                 headers={"Authorization": "Bearer shh-token"})
+        assert s["heartbeat"]["alive"] is True
+        out = _post(base + "/api/rescan", {},
+                    headers={"Authorization": "Bearer shh-token"})
+        assert "error" in out or "found" in out   # authorized either way
+    finally:
+        monkeypatch.delenv("MOXIE_DASH_TOKEN", raising=False)
 
 
 def test_update_env_preserves_other_lines(tmp_path):

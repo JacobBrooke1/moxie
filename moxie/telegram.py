@@ -60,8 +60,12 @@ class TelegramAPI:
         return out.get("result", [])
 
 
+RATE_MAX = 20        # messages per window before we ask for a breather
+RATE_WINDOW = 60.0   # seconds
+
+
 class Bot:
-    def __init__(self, config, store, audit, api=None, allow_chat_id=None):
+    def __init__(self, config, store, audit, api=None, allow_chat_id=None, clock=None):
         self.config = config
         self.store = store
         self.audit = audit
@@ -70,6 +74,9 @@ class Bot:
         self.api = api
         self.allow = str(allow_chat_id or config.telegram_chat_id or "") or None
         self.pending = {}  # chat_id -> action id awaiting YES
+        self._clock = clock or time.monotonic
+        self._recent = []          # timestamps of recent handled messages
+        self._rate_warned = False
 
     # ---- helpers ----------------------------------------------------------
     def _proposed(self):
@@ -113,6 +120,19 @@ class Bot:
         if str(chat_id) != self.allow:
             self.audit.append("telegram_denied", {"chat_id": str(chat_id)})
             return None
+
+        # Rate limit (Phase 7): even the paired chat gets a breather — a
+        # runaway script with your phone shouldn't be able to hammer the agent.
+        now = self._clock()
+        self._recent = [t for t in self._recent if now - t < RATE_WINDOW]
+        if len(self._recent) >= RATE_MAX:
+            if not self._rate_warned:
+                self._rate_warned = True
+                self.audit.append("telegram_rate_limited", {"chat_id": str(chat_id)})
+                return "⏳ Easy there — too many messages at once. Give me a minute."
+            return None
+        self._rate_warned = False
+        self._recent.append(now)
 
         low = text.lower()
 

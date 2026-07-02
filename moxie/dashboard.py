@@ -291,8 +291,16 @@ const val = id => $(id).value;
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   setTimeout(()=>t.style.display='none', 4000); }
 async function api(path, body){
-  const opts = body ? {method:'POST', body: JSON.stringify(body)} : {};
-  const r = await fetch(path, opts); return r.json(); }
+  const headers = {'X-Moxie':'1'};
+  const tok = sessionStorage.getItem('moxie_token');
+  if(tok) headers['Authorization'] = 'Bearer '+tok;
+  const opts = body ? {method:'POST', headers, body: JSON.stringify(body)} : {headers};
+  let r = await fetch(path, opts);
+  if(r.status === 401){
+    const t = prompt('This dash is token-protected (MOXIE_DASH_TOKEN). Enter the token:');
+    if(t){ sessionStorage.setItem('moxie_token', t); return api(path, body); }
+  }
+  return r.json(); }
 
 async function refresh(){
   const s = await api('/api/status');
@@ -383,6 +391,15 @@ def make_handler(dash: Dash):
             self.end_headers()
             self.wfile.write(body)
 
+        def _auth_ok(self) -> bool:
+            """Optional bearer token (MOXIE_DASH_TOKEN) — belt for the
+            localhost braces, and required if you insist on tunnelling."""
+            import os
+            token = os.environ.get("MOXIE_DASH_TOKEN", "")
+            if not token:
+                return True
+            return self.headers.get("Authorization", "") == f"Bearer {token}"
+
         def do_GET(self):
             if self.path == "/" or self.path.startswith("/index"):
                 body = PAGE.encode("utf-8")
@@ -391,10 +408,16 @@ def make_handler(dash: Dash):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            elif self.path == "/api/status":
-                self._json(dash.status())
-            elif self.path == "/api/findings":
-                self._json(dash.findings())
+            elif self.path.startswith("/api/"):
+                if not self._auth_ok():
+                    self._json({"error": "unauthorized — send Authorization: "
+                                         "Bearer <MOXIE_DASH_TOKEN>"}, 401)
+                elif self.path == "/api/status":
+                    self._json(dash.status())
+                elif self.path == "/api/findings":
+                    self._json(dash.findings())
+                else:
+                    self._json({"error": "not found"}, 404)
             elif self.path.startswith("/callback"):
                 # OAuth landing for bank consent: show the code to paste into
                 # `moxie connect` — this page never stores or logs it.
@@ -420,6 +443,15 @@ def make_handler(dash: Dash):
                 self._json({"error": "not found"}, 404)
 
         def do_POST(self):
+            if not self._auth_ok():
+                self._json({"error": "unauthorized"}, 401)
+                return
+            # CSRF: browsers can't attach custom headers cross-origin without
+            # a preflight we never approve — so requiring one blocks drive-by
+            # POSTs from malicious pages targeting 127.0.0.1.
+            if self.headers.get("X-Moxie") != "1":
+                self._json({"error": "missing X-Moxie header (CSRF guard)"}, 403)
+                return
             length = int(self.headers.get("Content-Length") or 0)
             try:
                 form = json.loads(self.rfile.read(length) or b"{}")

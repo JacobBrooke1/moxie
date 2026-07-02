@@ -58,13 +58,22 @@ Editing or deleting *any* past entry breaks the chain for every entry after it, 
 
 | If this is compromised… | …the damage is bounded by |
 |---|---|
-| The LLM (prompt injection, bad output) | Policy denies money movement; every one-way action still needs your approval with the draft shown |
-| The machine running Moxie unattended | `isatty()` fail-safe: no human, no consent |
+| The LLM (prompt injection, bad output) | The brain has no execute path at all; policy denies money movement; every one-way action still needs your approval with the draft shown. Transaction text is pinned as untrusted DATA in the system prompt |
+| The machine running Moxie unattended | `isatty()` fail-safe: no human, no consent. `MOXIE_LIVE` defaults off; the `KILL` file forces drafts even when it's on |
 | The audit log (tampering after the fact) | Hash chain — `moxie verify` fails loudly |
-| A chat channel (future WhatsApp/Telegram bridge) | Channels can ask and notify; sensitive setup (keys, account links) lives only in the local dashboard, never over chat |
+| The Telegram channel | Single-chat pairing + allowlist (others are ignored and audited), two-step approvals, rate limiting, and sensitive setup (keys, bank links) never happens over chat |
+| The dashboard (CSRF from a malicious page) | POSTs require a custom `X-Moxie` header (cross-origin pages can't send one without a preflight we never approve); optional bearer token (`MOXIE_DASH_TOKEN`) locks the whole API; binds to 127.0.0.1 only |
+| Your SMTP / provider credentials on disk | Use app passwords with minimal scope; `moxie secret set` moves them into the OS keychain; `moxie encrypt on` seals stored data and bank tokens with Fernet |
+| A stolen copy of `~/.moxie` (backup, disk image) | With encryption on: transactions, receipts, actions, and bank tokens are ciphertext without the key (which lives in the keychain, not the folder) |
+| The bank aggregator (TrueLayer/GoCardless/Plaid) | Read-only AIS scopes — there is no payment permission to abuse; *you* hold the provider account; consents lapse (~90 days, UK) |
+| Browser automation gone wrong | Double opt-in (`MOXIE_LIVE` **and** `MOXIE_BROWSER_OK`), per-merchant skill steps only (no improvising), pauses for a human at 2FA/CAPTCHA, and run it sandboxed (Docker) |
 | Moxie itself (bug, malicious fork) | Local-first + open source: no server of ours holds your data, and every line is readable |
 
-What the model does **not** defend against: a fully compromised local machine with an interactive user session. That's true of every local tool, including your banking browser tab.
+What the model does **not** defend against:
+
+- **A fully compromised local machine with an interactive user session.** That's true of every local tool, including your banking browser tab.
+- **The decisions table's keys.** Merchant names + action kinds in the snooze memory stay plaintext (they're SQL primary keys) even with encryption on. The amounts, drafts, and transactions do not.
+- **You approving a bad action.** Moxie shows the exact draft and destination; the final judgment is deliberately yours.
 
 ## Why standalone, not a skill inside a bigger agent?
 

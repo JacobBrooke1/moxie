@@ -105,7 +105,7 @@ moxie kill                        # panic button: force drafts-only until --rele
 
 Cancellations that work better on the merchant's website use **guided deep-links**: Moxie shows the exact URL and clicks (from the merchant's skill) and *you* do the final click — no passwords, no CAPTCHA fights.
 
-> ⚠️ **Status:** early scaffold. The Trust Vault (audit log, policy, approvals) is implemented; Plaid, OCR, and email ingestion are stubbed with clear `TODO`s. **Do not use with real financial data until the items in [SECURITY.md](SECURITY.md) are done.**
+> ⚠️ **Status:** feature-complete, pre-review. The Trust Vault, live action layer, bank providers, receipts, and the security hardening checklist (encryption at rest, OS keychain, dashboard token/CSRF, rate limiting) are all implemented and tested. What's missing is an **independent security review** — until then, use your own judgment with real financial data, keep `MOXIE_LIVE` off unless you've read the code, and see [SECURITY.md](SECURITY.md) for exactly where the edges are.
 
 ---
 
@@ -160,9 +160,9 @@ Channel security (borrowed from OpenClaw's design): the bot is **paired to exact
 
 ## Privacy & security
 
-- **Local-first.** Your receipts, transactions, and audit log live on your machine.
-- **Bring your own key.** Moxie uses *your* LLM API key, or a **local/offline model** (e.g. Ollama) + **local OCR** (Tesseract) so receipt images never touch a cloud service.
-- **Least privilege.** Account access is read-only (Plaid never exposes your credentials to the agent; Moxie never moves money).
+- **Local-first.** Your receipts, transactions, and audit log live on your machine — encrypted at rest once you run `moxie encrypt on`.
+- **Bring your own key.** Moxie uses *your* LLM API key, or a **local/offline model** (Ollama) + **local OCR** (Tesseract) so receipt images never touch a cloud service. `moxie secret set` keeps keys in the OS keychain instead of a file.
+- **Least privilege.** Bank access is read-only AIS via a provider *you* choose and own; Moxie never moves money — it's hard-denied in policy.
 - **Tamper-evident.** The audit log is hash-chained — any edit to past entries fails `moxie verify`.
 
 Security is the precondition for everything else here — see [SECURITY.md](SECURITY.md).

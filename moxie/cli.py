@@ -23,9 +23,10 @@ from .vault import AuditLog
 
 
 def _ctx(config=None):
+    from .secure import Cipher
     config = config or Config()
     config.home.mkdir(parents=True, exist_ok=True)
-    store = Store(config.home / "moxie.db")
+    store = Store(config.home / "moxie.db", cipher=Cipher.from_env())
     audit = AuditLog(config.home / "audit.log")
     return config, store, audit
 
@@ -103,6 +104,79 @@ def cmd_review(args):
                 "denied": "🚫", "failed": "❌"}.get(outcome, "•")
         print(f"{icon} {outcome.upper()}: [{action.kind}] {action.merchant} — {note}")
     print("\nEvery step recorded. See  moxie log  /  moxie verify.")
+
+
+def cmd_encrypt(args):
+    from .secure import KEY_NAME, Cipher, generate_key, get_secret, keyring_available, set_secret
+    config, store, audit = _ctx()
+
+    if args.mode == "status":
+        if get_secret(KEY_NAME):
+            print("🔐 Encryption at rest: ON (key found). New writes are encrypted.")
+        else:
+            print("🔓 Encryption at rest: OFF — the local store is plaintext SQLite.\n"
+                  "   Enable:  pip install \"moxie-agent[secure]\"  then  moxie encrypt on")
+        return
+
+    if args.mode == "on":
+        if get_secret(KEY_NAME):
+            print("Already on. (moxie encrypt status)")
+            return
+        try:
+            key = generate_key()
+        except RuntimeError as e:
+            raise SystemExit(f"❌ {e}")
+        if keyring_available():
+            set_secret(KEY_NAME, key)
+            where = "your OS keychain"
+        else:
+            from .dashboard import _update_env_file
+            _update_env_file(config.home / ".env", {KEY_NAME: key})
+            where = f"{config.home / '.env'} (install keyring to do better)"
+        import os
+        os.environ[KEY_NAME] = key
+        cipher = Cipher(key)
+        rows = store.reencrypt_all(cipher)
+        from .providers import BankLink
+        link = BankLink(config, cipher=cipher)
+        state = BankLink(config, cipher=None).load()
+        if state:
+            link.save(state)
+        audit.append("encryption_enabled", {"rows_migrated": rows})
+        print(f"🔐 Encryption ON. Key stored in {where}.")
+        print(f"   {rows} stored row(s) re-encrypted; bank tokens sealed.")
+        print("   ⚠️ Losing the key means losing the data — back it up somewhere safe.")
+        return
+
+    raise SystemExit("usage: moxie encrypt on|status")
+
+
+def cmd_secret(args):
+    from .secure import get_secret, keyring_available, set_secret
+    config, store, audit = _ctx()
+    name = args.name.strip().upper()
+    if args.action == "set":
+        import getpass
+        try:
+            value = getpass.getpass(f"value for {name} (hidden): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\ncancelled")
+            return
+        if not value:
+            print("nothing entered; nothing saved")
+            return
+        try:
+            where = set_secret(name, value)
+        except RuntimeError as e:
+            raise SystemExit(f"❌ {e}")
+        audit.append("secret_saved", {"name": name, "where": where})  # never the value
+        print(f"✅ {name} stored in the {where}. Remove any copy from .env "
+              "— the keychain now wins whenever .env doesn't set it.")
+    else:  # check
+        has = bool(get_secret(name))
+        via_keyring = keyring_available()
+        print(f"{name}: {'set' if has else 'NOT set'}"
+              + ("" if via_keyring else "  (keyring not installed — env/.env only)"))
 
 
 def cmd_kill(args):
@@ -331,6 +405,14 @@ def cmd_doctor(args):
     else:
         print("  [ok] Actions: drafts only (set MOXIE_LIVE=true to send for real)")
 
+    from .secure import KEY_NAME, get_secret, keyring_available
+    enc = bool(get_secret(KEY_NAME))
+    print(f"  [{'ok' if enc else ' -'}] Encryption at rest: "
+          + ("ON" if enc else "off (moxie encrypt on — needs [secure] extra)"))
+    print(f"  [{'ok' if keyring_available() else ' -'}] OS keychain: "
+          + ("available (moxie secret set NAME)" if keyring_available()
+             else "not installed (secrets live in .env; pip install \"moxie-agent[secure]\")"))
+
     from .providers import BankLink
     bank = BankLink(config).status()
     if bank["linked"]:
@@ -384,6 +466,15 @@ def main(argv=None):
     p = sub.add_parser("kill", help="engage the kill switch (force drafts-only)")
     p.add_argument("--release", action="store_true", help="release the kill switch")
     p.set_defaults(func=cmd_kill)
+
+    p = sub.add_parser("encrypt", help="encrypt the local store at rest (needs [secure] extra)")
+    p.add_argument("mode", choices=["on", "status"], help="turn on, or show status")
+    p.set_defaults(func=cmd_encrypt)
+
+    p = sub.add_parser("secret", help="keep secrets in the OS keychain instead of .env")
+    p.add_argument("action", choices=["set", "check"])
+    p.add_argument("name", help="e.g. MOXIE_API_KEY, TELEGRAM_BOT_TOKEN, MOXIE_SMTP_PASSWORD")
+    p.set_defaults(func=cmd_secret)
 
     p = sub.add_parser("connect", help="link a bank read-only via a provider you choose")
     p.add_argument("provider", help="truelayer (UK default) | gocardless (free tier) | plaid")

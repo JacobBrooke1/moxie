@@ -4,8 +4,11 @@ Decisions are Moxie's memory: once you skip or act on a finding, it is
 remembered and not re-proposed while the snooze window lasts -- an agent
 that nags you daily with the same question gets uninstalled.
 
-NOTE: encryption-at-rest is a TODO before any real-data use (see SECURITY.md).
-Stdlib only.
+Encryption at rest (Phase 7): pass a Cipher (moxie/secure.py) and the JSON
+payload columns — actions, receipts, transactions — are Fernet-encrypted on
+disk (`moxie encrypt on`). The decisions table's merchant/kind keys stay
+plaintext (they're SQL primary keys); SECURITY.md says so out loud.
+Stdlib only; the cipher itself is an optional extra.
 """
 from __future__ import annotations
 
@@ -16,16 +19,25 @@ import sqlite3
 from pathlib import Path
 
 from .models import ProposedAction, Receipt, Transaction
+from .secure import maybe_decrypt
 
 
 class Store:
-    def __init__(self, path: "Path | str"):
+    def __init__(self, path: "Path | str", cipher=None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: the dashboard serves from worker threads;
         # every write commits immediately, so cross-thread reuse is safe here.
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
+        self.cipher = cipher
         self._init()
+
+    # --- encryption plumbing ---
+    def _seal(self, text: str) -> str:
+        return self.cipher.encrypt(text) if self.cipher else text
+
+    def _open(self, text: str) -> str:
+        return maybe_decrypt(text, self.cipher)
 
     def _init(self) -> None:
         self.db.execute("CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY, data TEXT)")
@@ -42,13 +54,13 @@ class Store:
     def save_action(self, action: ProposedAction) -> None:
         self.db.execute(
             "REPLACE INTO actions (id, data) VALUES (?, ?)",
-            (action.id, json.dumps(dataclasses.asdict(action))),
+            (action.id, self._seal(json.dumps(dataclasses.asdict(action)))),
         )
         self.db.commit()
 
     def load_actions(self) -> "list[ProposedAction]":
         rows = self.db.execute("SELECT data FROM actions").fetchall()
-        return [ProposedAction(**json.loads(r[0])) for r in rows]
+        return [ProposedAction(**json.loads(self._open(r[0]))) for r in rows]
 
     def clear_actions(self) -> None:
         self.db.execute("DELETE FROM actions")
@@ -58,26 +70,41 @@ class Store:
     def save_receipt(self, receipt: Receipt) -> None:
         self.db.execute(
             "REPLACE INTO receipts (id, data) VALUES (?, ?)",
-            (receipt.id, json.dumps(dataclasses.asdict(receipt))),
+            (receipt.id, self._seal(json.dumps(dataclasses.asdict(receipt)))),
         )
         self.db.commit()
 
     def load_receipts(self) -> "list[Receipt]":
         rows = self.db.execute("SELECT data FROM receipts").fetchall()
-        return [Receipt(**json.loads(r[0])) for r in rows]
+        return [Receipt(**json.loads(self._open(r[0]))) for r in rows]
 
     # --- transactions (latest import, so chat channels can reason later) ---
     def save_transactions(self, txns: "list[Transaction]") -> None:
         self.db.execute("DELETE FROM transactions")
         self.db.executemany(
             "INSERT INTO transactions (id, data) VALUES (?, ?)",
-            [(t.id, json.dumps(dataclasses.asdict(t))) for t in txns],
+            [(t.id, self._seal(json.dumps(dataclasses.asdict(t)))) for t in txns],
         )
         self.db.commit()
 
     def load_transactions(self) -> "list[Transaction]":
         rows = self.db.execute("SELECT data FROM transactions").fetchall()
-        return [Transaction(**json.loads(r[0])) for r in rows]
+        return [Transaction(**json.loads(self._open(r[0]))) for r in rows]
+
+    def reencrypt_all(self, cipher) -> int:
+        """Migrate every stored payload to `cipher` (enabling encryption on a
+        store with plaintext history). Returns rows rewritten."""
+        old_cipher, self.cipher = self.cipher, cipher
+        count = 0
+        for table in ("actions", "receipts", "transactions"):
+            rows = self.db.execute(f"SELECT id, data FROM {table}").fetchall()
+            for rid, data in rows:
+                plain = maybe_decrypt(data, old_cipher or cipher)
+                self.db.execute(f"UPDATE {table} SET data = ? WHERE id = ?",
+                                (self._seal(plain), rid))
+                count += 1
+        self.db.commit()
+        return count
 
     # --- decisions (Moxie's memory) ---
     def save_decision(self, merchant: str, kind: str, status: str, date: "str | None" = None) -> None:

@@ -82,7 +82,8 @@ class Config:
 
     @property
     def api_key(self) -> "str | None":
-        return os.environ.get("MOXIE_API_KEY")
+        from .secure import get_secret
+        return get_secret("MOXIE_API_KEY")
 
     @property
     def offline(self) -> bool:
@@ -96,7 +97,8 @@ class Config:
 
     @property
     def telegram_token(self) -> "str | None":
-        return os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("MOXIE_TELEGRAM_TOKEN")
+        from .secure import get_secret
+        return get_secret("TELEGRAM_BOT_TOKEN") or get_secret("MOXIE_TELEGRAM_TOKEN")
 
     @property
     def telegram_chat_id(self) -> "str | None":

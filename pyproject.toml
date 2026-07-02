@@ -25,7 +25,8 @@ dependencies = []
 pdf = ["pypdf>=4.0"]  # bank statement PDF import (moxie scan --pdf)
 ocr = ["pytesseract>=0.3.10", "Pillow>=10.0"]  # photo receipts (local OCR)
 browser = ["playwright>=1.40"]  # tier-3 browser automation (run sandboxed!)
-dev = ["pytest>=7.0"]
+secure = ["cryptography>=42.0", "keyring>=24.0"]  # encryption at rest + OS keychain
+dev = ["pytest>=7.0", "cryptography>=42.0"]  # cryptography: the cipher tests run in CI
 
 [project.urls]
 Homepage = "https://github.com/JacobBrooke1/moxie"

@@ -61,25 +61,33 @@ def _http(method: str, url: str, headers=None, data=None) -> dict:
 # link state — which provider is connected, its tokens, when consent started
 # --------------------------------------------------------------------------- #
 class BankLink:
-    """Persisted link state at ~/.moxie/bank.json (tokens are secrets: 0600)."""
+    """Persisted link state at ~/.moxie/bank.json (tokens are secrets: 0600,
+    and Fernet-encrypted when `moxie encrypt on` has been run)."""
 
-    def __init__(self, config):
+    def __init__(self, config, cipher=None):
+        from .secure import Cipher
         self.config = config
         self.path = config.home / "bank.json"
+        self.cipher = cipher if cipher is not None else Cipher.from_env()
 
     def load(self) -> "dict | None":
+        from .secure import maybe_decrypt
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            raw = self.path.read_text(encoding="utf-8")
+            return json.loads(maybe_decrypt(raw.strip(), self.cipher))
         except (OSError, json.JSONDecodeError):
             return None
 
     def save(self, state: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        blob = json.dumps(state, indent=2)
+        if self.cipher:
+            blob = self.cipher.encrypt(blob)
+        self.path.write_text(blob, encoding="utf-8")
         try:
             os.chmod(self.path, 0o600)
         except OSError:
-            pass  # Windows: chmod is advisory; keychain lands in Phase 7
+            pass  # Windows: chmod is advisory; encryption is the real cover
 
     def clear(self) -> None:
         try:
