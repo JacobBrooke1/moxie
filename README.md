@@ -54,7 +54,7 @@ Look at who already touches your money:
 ## Quickstart
 
 ```bash
-# install
+# install (from source today; `pip install moxie-agent` once on PyPI)
 git clone https://github.com/JacobBrooke1/moxie.git
 cd moxie
 pip install -e .          # or: ./install.sh
@@ -190,7 +190,7 @@ What's *not* borrowed is the whole point: the **Trust Vault** (consent-first, ta
 
 ## Contributing
 
-The most valuable contribution is **skills** — encoded know-how for cancelling/disputing with a specific merchant, bank, or service. See [CONTRIBUTING.md](CONTRIBUTING.md) and the example in [`skills/`](skills/).
+The most valuable contribution is **skills** — encoded know-how for cancelling/disputing with a specific merchant, bank, or service; they genuinely drive how Moxie acts. See [skills/README.md](skills/README.md) for the format, [CONTRIBUTING.md](CONTRIBUTING.md) for good first issues, and [`integrations/moxie-bridge/`](integrations/moxie-bridge/SKILL.md) if you want your OpenClaw/Hermes agent to talk to Moxie (look, never touch).
 
 ---
 

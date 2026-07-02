@@ -1,6 +1,22 @@
 # Moxie — Build Plan (what comes next)
 
-*A grounded, phased roadmap for the open-source code as it stands today. Every phase names the real files to touch, why it matters, and how you'll know it's done. Nothing here is already-built work.*
+> **STATUS (2026-07-02): every phase below is implemented and tested** — 135 tests green.
+>
+> - **P1 action layer** ✅ email (SMTP) / guided deep-link / browser tiers behind `MOXIE_LIVE` + kill switch (`moxie/actions.py`)
+> - **P9 slice: CI + packaging** ✅ GitHub Actions (tests + ruff), release workflow, templates
+> - **P2 bank providers** ✅ TrueLayer / GoCardless / Plaid behind `AccountProvider` (`moxie/providers.py`, `moxie connect|sync`)
+> - **P2b money picture** ✅ `moxie/snapshot.py`, grounded brain answers, `moxie budget`, `/budget`, dash card
+> - **P3 receipts** ✅ local OCR + read-only IMAP + matching + evidence on disputes (`moxie/receipts.py`)
+> - **P4 detectors** ✅ 8 detectors: dups, zombies, new subs, price hikes, duplicate services, bank fees, FX fees, short refunds
+> - **P5 offline brain** ✅ `MOXIE_MODEL=ollama:llama3.1`
+> - **P6 skills wired** ✅ routes steer channel/draft, advice adds playbooks, usage tracked, UK library seeded
+> - **P7 security** ✅ encryption at rest, OS keychain, dash token+CSRF, TG rate limit, threat model (external review still open)
+> - **P8 24/7** ✅ `moxie serve`, systemd/launchd/Docker, `docs/HOSTING.md`
+> - **P9 distribution** ✅ code-side done; the human-only steps (PyPI publish, community launch) are in `docs/LAUNCH.md`
+>
+> The remaining human-only items live in **[docs/LAUNCH.md](LAUNCH.md)**. The plan below is kept as the original rationale.
+
+*A grounded, phased roadmap for the open-source code as it stood before the build-out. Every phase names the real files to touch, why it matters, and how you'll know it's done.*
 
 ---
 

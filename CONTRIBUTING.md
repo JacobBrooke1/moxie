@@ -21,7 +21,8 @@ skills/
 name: Cancel ExampleGym membership
 merchant: ExampleGym
 action_type: cancel_subscription   # cancel_subscription | dispute_charge | chase_refund | negotiate
-success_rate: 0.82                 # your honest estimate, 0–1
+channel: email                     # email | deeplink | browser — how to act
+email: member-services@examplegym.com
 ---
 
 # Cancel ExampleGym membership
@@ -33,7 +34,29 @@ success_rate: 0.82                 # your honest estimate, 0–1
 4. Escalate to a card chargeback only if no confirmation in 14 days.
 ```
 
-The loader is dependency-free (no PyYAML), so adding a skill never adds a dependency.
+Skills *drive* actions: the channel, the verified address or exact cancel URL,
+the steps, the escalation path. See [skills/README.md](skills/README.md) for the
+full format (deep-links, `moxie-steps` browser blocks, `moxie-draft` templates,
+and `merchant: "*"` bank-route skills). The loader is dependency-free (no
+PyYAML), so adding a skill never adds a dependency.
+
+## Good first issues
+
+Each of these is one self-contained PR with an existing pattern to copy:
+
+1. **A merchant skill** — the top of this file. Pick any subscription you've
+   actually cancelled. (Pattern: `skills/cancel-netflix/SKILL.md`.)
+2. **A detector** — one function in `moxie/detect.py` + tests in
+   `tests/test_detect_more.py`. Ideas: gambling-spend summary, charity-donation
+   Gift Aid reminder, duplicate insurance, water/energy bill spikes.
+   (Pattern: `find_bank_fees`.)
+3. **A bank CSV header mapping** — add your bank's column names to
+   `moxie/connectors.py` + a sample-row test. (Pattern: `_DATE_COLS` etc.)
+4. **A statement-PDF layout** — extend `parse_statement_text` for your bank's
+   PDF, with a redacted fixture. (Pattern: `tests/test_statements.py`.)
+5. **A provider** — implement `AccountProvider` for another aggregator
+   (Enable Banking, Yapily…). (Pattern: `moxie/providers.py`, fake-transport
+   tests in `tests/test_providers.py`.)
 
 **Rules for skills**
 - Only lawful, consumer-protective actions (cancel, dispute, refund, negotiate). No deception, no impersonation, no accessing accounts that aren't the user's own.
