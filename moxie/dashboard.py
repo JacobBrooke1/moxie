@@ -81,6 +81,8 @@ class Dash:
                 "last_event": entries[-1]["event"] if entries else None,
                 "last_event_ts": entries[-1]["ts"] if entries else None,
                 "last_daily_scan": self.store.get_meta("last_auto_scan"),
+                "next_daily_scan": self._next_daily_scan(),
+                "last_bank_sync": self.store.get_meta("last_bank_sync"),
             },
             "brain": {
                 "ready": Brain(self.config).available,
@@ -139,6 +141,92 @@ class Dash:
         self.audit.append("brain_tested", {"ok": True})
         return {"ok": True, "model": self.config.model,
                 "reply": (reply or "")[:80]}
+
+    # ---- activity feed (the audit log, humanized) ----------------------------
+    def activity(self, limit: int = 30) -> list:
+        """The last N audit events as a readable timeline. The hash-chained
+        log stays the source of truth; this is just its human face."""
+        out = []
+        for e in reversed(self.audit.entries()):
+            if e["event"] == "policy_eval":
+                continue  # every action logs one; noise in a feed
+            summary = self._humanize(e["event"], e.get("data", {}) or {})
+            out.append({"ts": e["ts"], "event": e["event"], "summary": summary})
+            if len(out) >= limit:
+                break
+        return out
+
+    @staticmethod
+    def _humanize(event: str, d: dict) -> str:
+        if event == "scan":
+            return (f"Scanned {d.get('transactions', 0)} transactions — "
+                    f"{d.get('found', 0)} finding(s), {d.get('suppressed', 0)} snoozed")
+        if event == "daily_scan":
+            return f"Daily scan ran — {d.get('found', 0)} finding(s)"
+        if event == "action_executed":
+            who = f"{d.get('kind', 'action')} for {d.get('merchant', '?')}"
+            if d.get("sent"):
+                ref = f" (ref {d.get('reference')})" if d.get("reference") else ""
+                return f"SENT {who} via {d.get('channel_used', '?')}{ref}"
+            return f"Drafted {who} (dry-run — nothing was sent)"
+        if event == "action_skipped":
+            return "You skipped a finding — remembered, no nagging"
+        if event == "action_failed":
+            return (f"FAILED: {d.get('kind', 'action')} for {d.get('merchant', '?')} "
+                    f"— {d.get('error', '')[:80]}")
+        if event == "bank_linked":
+            return f"Bank linked via {d.get('provider', '?')} ({d.get('accounts', 0)} account(s))"
+        if event == "bank_sync":
+            return f"Bank sync: {d.get('transactions', 0)} transactions from {d.get('provider', '?')}"
+        if event == "csv_imported":
+            return f"CSV imported: {d.get('name', '?')} ({d.get('transactions', 0)} transactions)"
+        if event == "sample_data_loaded":
+            return "Sample data loaded (the demo)"
+        if event == "telegram_denied":
+            return f"Ignored a message from unknown chat {d.get('chat_id', '?')}"
+        if event == "telegram_rate_limited":
+            return "Telegram rate limit kicked in"
+        if event == "setup_saved":
+            return "Setup updated: " + ", ".join(d.get("keys", [])) + " (values never logged)"
+        if event == "secret_saved":
+            return f"Secret {d.get('name', '?')} moved to the {d.get('where', 'keychain')}"
+        if event == "encryption_enabled":
+            return f"Encryption at rest enabled ({d.get('rows_migrated', 0)} rows sealed)"
+        if event == "kill_switch":
+            return ("KILL SWITCH engaged — drafts only" if d.get("engaged")
+                    else "Kill switch released")
+        if event == "dashboard_chat":
+            return "Chat with Moxie"
+        if event == "brain_tested":
+            return "API key tested — brain is up"
+        if event == "wizard_done":
+            return "Setup wizard finished"
+        if event == "draft_edited":
+            return "You edited a draft before approving"
+        if event == "receipt_filed":
+            return (f"Receipt filed: {d.get('merchant', '?')} "
+                    f"({'matched to a transaction' if d.get('matched') else 'no match yet'})")
+        if event == "serve_started":
+            return "moxie serve came up"
+        if event == "ask":
+            return "Question asked via the CLI"
+        if event == "init":
+            return "Moxie initialised"
+        return event.replace("_", " ")
+
+    def _next_daily_scan(self) -> "str | None":
+        """When the daily loop will next run (serve/telegram must be running)."""
+        import datetime as dt
+        try:
+            hour = self.config.scan_hour
+            now = dt.datetime.now()
+            candidate = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+            already_ran = self.store.get_meta("last_auto_scan") == now.date().isoformat()
+            if candidate <= now or already_ran:
+                candidate += dt.timedelta(days=1)
+            return candidate.isoformat(timespec="minutes")
+        except Exception:
+            return None
 
     # ---- chat (advises and navigates; NEVER executes) ------------------------
     def chat(self, message: str) -> dict:
@@ -491,6 +579,11 @@ PAGE = """<!doctype html>
 <h2 id="findings_h">Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
 <table id="findings"></table>
 
+<h2>Activity</h2>
+<div class="card" style="padding:6px 14px">
+  <table id="activity" style="font-size:13px"></table>
+</div>
+
 <h2>Setup</h2>
 <div class="setup">
   <div class="card">
@@ -656,7 +749,8 @@ async function refresh(){
   wizardToggle(s.setup);
   $('ver').textContent = s.version;
   $('hb2').textContent = 'last event: ' + (s.heartbeat.last_event||'—') +
-      (s.heartbeat.last_daily_scan ? ' · daily scan: '+s.heartbeat.last_daily_scan : '');
+      (s.heartbeat.next_daily_scan ? ' · next scan '+s.heartbeat.next_daily_scan.replace('T',' ') : '') +
+      (s.heartbeat.last_bank_sync ? ' · bank synced '+s.heartbeat.last_bank_sync.slice(5,16).replace('T',' ') : '');
   $('brain').textContent = s.brain.ready ? 'ready' : (s.brain.offline ? 'offline mode' : 'no key');
   $('brain').className = 'big ' + (s.brain.ready ? 'ok' : 'warn');
   $('brain2').textContent = s.brain.model;
@@ -697,7 +791,17 @@ async function refresh(){
     '</td><td style="white-space:nowrap">~'+a.currency+a.est_savings.toFixed(2)+'/yr</td>'+
     '<td style="white-space:nowrap"><button onclick="approve(\\''+a.id+'\\')">approve</button> '+
     '<button onclick="skip(\\''+a.id+'\\')">skip</button></td></tr>').join('')
-    : '<tr><td class="muted">Nothing waiting on you. Import data with: moxie scan --csv / --pdf</td></tr>';
+    : '<tr><td class="muted">Nothing waiting on you. Import data in Setup, or link a bank.</td></tr>';
+
+  const acts = await api('/api/activity');
+  $('activity').innerHTML = (Array.isArray(acts) && acts.length)
+    ? acts.map(a => {
+        const when = new Date(a.ts*1000);
+        const hh = when.toTimeString().slice(0,5);
+        const dd = when.toISOString().slice(5,10);
+        return '<tr><td class="muted" style="white-space:nowrap; width:90px">'+dd+' '+hh+
+               '</td><td>'+esc(a.summary)+'</td></tr>'; }).join('')
+    : '<tr><td class="muted">Nothing yet — everything Moxie does lands here (and in the tamper-evident log).</td></tr>';
 }
 async function approve(id){
   const f = (await api('/api/findings')).find(x=>x.id===id);
@@ -784,6 +888,8 @@ def make_handler(dash: Dash):
                     self._json(dash.findings())
                 elif self.path == "/api/chat/history":
                     self._json(dash.chat_history())
+                elif self.path == "/api/activity":
+                    self._json(dash.activity())
                 else:
                     self._json({"error": "not found"}, 404)
             elif self.path.startswith("/callback"):
