@@ -4,6 +4,8 @@
 
 This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and this enriches it — do not rebuild what's there. Every phase keeps the invariants at the bottom of this file.
 
+> **Scope for the current build:** build **every phase except Phase 4 (the money dashboard)**, which is deferred to a later pass. The **top priority is frictionless onboarding** — the dashboard must become the single front door so that anyone can: find the repo → install → run one command → the dashboard opens → paste their Claude API key there → and set up everything else (Telegram, bank, scanning, chat) from that one screen, whether they're running locally or on a VPS. Do **Phase 2 (onboarding) first**, then Phase 1 (chat), then the rest.
+
 ---
 
 ## 0. What already exists (do NOT rebuild)
@@ -20,9 +22,10 @@ This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and 
 
 ---
 
-## The single most important leap
+## The two most important leaps
 
-**Phase 1 is the product's "wow".** Everything else is valuable, but the moment Moxie becomes *your agent you talk to* — not a CLI you run — is when you can chat to it inside the dashboard the way you chatted to otto in OpenClaw. Do Phase 1 first.
+1. **Frictionless onboarding (Phase 2) — the gate everyone hits.** If a newcomer can't get from "I found the repo" to "the dashboard is open and my key is connected" in a couple of minutes, nothing else matters. The dashboard must be the front door: one command launches it and opens the browser; the first screen is a guided wizard whose first step is connecting the Claude API key. **Build this first.**
+2. **Chat with Moxie (Phase 1) — the "wow".** Once someone's in, the moment Moxie becomes *an agent you talk to* — not a CLI you run — is the chat panel, the way you chatted to otto in OpenClaw. **Build this second.**
 
 ---
 
@@ -43,18 +46,19 @@ This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and 
 
 ---
 
-## Phase 2 — First-run setup wizard  *(effort: S/M)*
+## Phase 2 — Frictionless onboarding: the dashboard is the front door  *(effort: M · DO FIRST)*
 
-**Goal:** the OpenClaw onboarding feel — open the dashboard the first time and it walks you through setup, "connect your Claude API key" as step 1.
+**Goal:** download → one command → the dashboard opens → connect your Claude API key there → set up everything else from that screen. Anyone, local or VPS, in a couple of minutes. This is the headline of this build.
 
-**Do this (`dashboard.py`):**
-- Detect an unconfigured state (no key, no data, no Telegram) and show a **stepper**: 1) paste + **test** the Anthropic key (add `POST /api/brain/test` that makes one cheap call and reports ok/fail), 2) get data in (import a CSV **or** link a bank — link into Phase 3), 3) optional Telegram pairing (reuse the existing token + detect-chat-id flow).
-- Each step shows a green tick when done; the wizard collapses into the normal dashboard once you're set up (or via a "skip setup" link).
+**Do this (`dashboard.py`, `cli.py`, `serve.py`, `README.md`):**
+- **One-command launch.** `moxie dashboard` starts the server and **auto-opens the browser** (`webbrowser.open`, best-effort, skip if headless/`MOXIE_NO_BROWSER`). Make bare `moxie` (no command) launch the dashboard too (or print a single clear "run `moxie dashboard` to get started" line). Keep `python -m moxie dashboard` working as the robust fallback and document it once.
+- **First-run wizard.** Detect an unconfigured state (no key, no data, no Telegram) and land on a **stepper**, not the flat panel: 1) paste + **test** the Anthropic key live (add `POST /api/brain/test` — one cheap call, reports ok/fail with a friendly error), 2) get data in (import a CSV **or** link a bank — routes into Phase 3), 3) optional Telegram pairing (reuse the existing token + detect-chat-id flow). Each step shows a green tick; the wizard collapses into the normal dashboard once set up (with a "skip for now" link).
+- **Rewrite the README quickstart** so the *primary* path is exactly: (1) install (`pip install moxie-agent`, or clone + `pip install -e .`), (2) run `moxie dashboard`, (3) do everything else in the browser — connect your key, add your data, pair Telegram. The CLI commands become the "power user / automation" alternative, not the first thing a newcomer sees. Keep the "runs on sample data, no bank or key needed" promise for the very first look.
 - Keep all secret-writing on this local page only (never over chat) — unchanged from today.
 
-**Acceptance:** a fresh `~/.moxie` opens straight into a 3-step wizard; finishing it lands you on the live dashboard with the brain ready.
+**Acceptance:** a brand-new user with a fresh `~/.moxie` runs one command, the browser opens to a 3-step wizard, pastes their key (which is tested live), and lands on a working dashboard — having touched the terminal exactly once. The README's first section reflects this exact flow.
 
-**Tests:** `/api/brain/test` with a fake transport (ok + fail cases); wizard-state JSON reflects what's configured.
+**Tests:** `/api/brain/test` with a fake transport (ok + fail cases); wizard-state JSON reflects what's configured; the browser-open is guarded so it never fires in CI/headless.
 
 ---
 
@@ -74,7 +78,9 @@ This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and 
 
 ---
 
-## Phase 4 — The money dashboard (see all your money)  *(effort: M/L)*
+## Phase 4 — The money dashboard (see all your money)  *(effort: M/L · ⏸ DEFERRED — do NOT build in this pass)*
+
+> **Deferred.** Kept here as the spec for a future build. Skip it entirely for now — ship onboarding, chat, bank-linking, activity feed, secure remote, and polish first, then come back to this.
 
 **Goal:** the "banking dashboard" — a real money view, not one card. This is the "later" feature you described, built on data `snapshot.py` already computes.
 
@@ -140,11 +146,11 @@ This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and 
 
 ---
 
-## Suggested sequence
+## Suggested sequence (for this build)
 
-**P1 (chat) → P2 (wizard) → P3 (link bank in-dashboard) → P4 (money view) → P5 (activity feed) → P6 (secure remote) → P7 (polish).**
+**P2 (onboarding / front door) → P1 (chat) → P3 (link bank in-dashboard) → P5 (activity feed) → P6 (secure remote) → P7 (polish).  ⏸ P4 (money view) is deferred.**
 
-Chat first because it's the "wow". Wizard next so onboarding is one screen. Then bank-linking and the money view, because together they make the dashboard the place you actually live. Activity feed and secure-remote make it a real always-on control plane. Polish last.
+Onboarding first because it's the gate everyone hits — the dashboard must be the front door. Chat next because it's the "wow". Then in-dashboard bank-linking, the activity feed, and secure-remote make it a real always-on control plane. Polish last. The money dashboard (P4) comes in a later pass once this is being used.
 
 ## The one thing to leave for the human
 
