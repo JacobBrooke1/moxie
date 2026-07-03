@@ -54,10 +54,9 @@ Look at who already touches your money:
 ## Quickstart
 
 ```bash
-# install (from source today; `pip install moxie-agent` once on PyPI)
-git clone https://github.com/JacobBrooke1/moxie.git
-cd moxie
-pip install -e .          # or: ./install.sh
+# install
+pip install moxie-agent   # from PyPI
+# …or from source:  git clone https://github.com/JacobBrooke1/moxie.git && cd moxie && pip install -e .
 
 # try it with built-in sample data — no bank, no API key needed
 # (Windows: if `moxie` isn't recognized, pip's Scripts dir isn't on PATH —
