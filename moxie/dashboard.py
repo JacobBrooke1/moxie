@@ -140,6 +140,44 @@ class Dash:
         return {"ok": True, "model": self.config.model,
                 "reply": (reply or "")[:80]}
 
+    # ---- chat (advises and navigates; NEVER executes) ------------------------
+    def chat(self, message: str) -> dict:
+        """Talk to Moxie about your money, grounded in your real data. The
+        brain has no execute path — when the user wants to act, we point at
+        the matching finding and the Vault's approval modal takes over."""
+        message = (message or "").strip()
+        if not message:
+            return {"error": "say something"}
+        brain = Brain(self.config, transport=self._brain_transport)
+        if not brain.available:
+            return {"error": "the brain isn't connected yet — add your API key "
+                             "in Setup (or configure a local Ollama model)"}
+        from .snapshot import snapshot_from_store
+        txns = self.store.load_transactions()
+        actions = self.store.load_actions()
+        history = self.store.load_chat(limit=12)
+        try:
+            reply = brain.converse(message, history, txns, actions,
+                                   snapshot=snapshot_from_store(self.store))
+        except Exception as e:
+            return {"error": f"the brain call failed: {e}"}
+        self.store.save_chat("user", message)
+        self.store.save_chat("assistant", reply)
+        self.audit.append("dashboard_chat", {"chars": len(message)})
+
+        # If the exchange mentions a live finding, offer the review button —
+        # the human acts through the Vault, never through chat.
+        blob = (message + " " + reply).lower()
+        related = [
+            {"id": a.id, "merchant": a.merchant, "description": a.description}
+            for a in actions
+            if a.status == "proposed" and a.merchant.lower() in blob
+        ][:4]
+        return {"reply": reply, "related": related}
+
+    def chat_history(self) -> list:
+        return self.store.load_chat(limit=40)
+
     def import_csv_text(self, name: str, text: str) -> dict:
         """In-browser CSV import: the file is read client-side and its text
         POSTed here — it never needs to touch disk."""
@@ -376,7 +414,19 @@ PAGE = """<!doctype html>
       <div class="muted" id="money2"></div></div>
 </div>
 
-<h2>Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
+<h2>Chat with Moxie</h2>
+<div class="card" style="padding:0">
+  <div id="chatlog" style="max-height:340px; overflow-y:auto; padding:14px;"></div>
+  <div style="display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line)">
+    <input id="chatbox" placeholder='Ask about your money — "what should I cancel?" · "can I afford £120 trainers?"'
+           onkeydown="if(event.key==='Enter') sendChat()">
+    <button class="primary" onclick="sendChat()" style="white-space:nowrap">Send</button>
+  </div>
+  <div class="muted" style="padding:0 14px 10px">Moxie advises here; it never acts from chat.
+    Anything worth doing routes you to Findings, where you approve it.</div>
+</div>
+
+<h2 id="findings_h">Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
 <table id="findings"></table>
 
 <h2>Setup</h2>
@@ -497,6 +547,48 @@ async function wizPair(){
 }
 async function wizFinish(){ await api('/api/wizard/done', {}); refresh(); }
 
+function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function chatBubble(role, text, related){
+  const mine = role==='user';
+  let extra = '';
+  if(related && related.length){
+    extra = '<div style="margin-top:6px">' + related.map(r =>
+      '<button onclick="goFinding()">Review: '+esc(r.merchant)+' →</button> ').join('') + '</div>';
+  }
+  return '<div style="margin:6px 0; text-align:'+(mine?'right':'left')+'">'+
+    '<div style="display:inline-block; max-width:86%; padding:8px 12px; border-radius:10px; '+
+    'text-align:left; white-space:pre-wrap; border:1px solid var(--line); '+
+    (mine?'background:#1f2733':'background:var(--bg)')+'">'+esc(text)+extra+'</div></div>';
+}
+function goFinding(){
+  $('findings_h').scrollIntoView({behavior:'smooth'});
+  const t = $('findings'); t.style.outline = '2px solid var(--orange)';
+  setTimeout(()=>t.style.outline='none', 2000);
+}
+async function loadChat(){
+  const h = await api('/api/chat/history');
+  if(Array.isArray(h) && h.length){
+    $('chatlog').innerHTML = h.map(t => chatBubble(t.role, t.text)).join('');
+    $('chatlog').scrollTop = $('chatlog').scrollHeight;
+  } else {
+    $('chatlog').innerHTML = '<div class="muted">🦡 Ask me anything about your money. '+
+      'I can explain findings, weigh a purchase against what\\'s left this month, '+
+      'or sharpen a cancellation draft — you approve everything in Findings.</div>';
+  }
+}
+async function sendChat(){
+  const box = $('chatbox'); const msg = box.value.trim();
+  if(!msg) return;
+  box.value = '';
+  $('chatlog').innerHTML += chatBubble('user', msg);
+  $('chatlog').innerHTML += '<div id="thinking" class="muted" style="margin:6px 0">…</div>';
+  $('chatlog').scrollTop = $('chatlog').scrollHeight;
+  const r = await api('/api/chat', {message: msg});
+  const think = $('thinking'); if(think) think.remove();
+  $('chatlog').innerHTML += chatBubble('assistant', r.error ? ('⚠️ '+r.error) : r.reply, r.related);
+  $('chatlog').scrollTop = $('chatlog').scrollHeight;
+}
+
 async function refresh(){
   const s = await api('/api/status');
   wizardToggle(s.setup);
@@ -570,7 +662,7 @@ async function detect(){ const r = await api('/api/telegram/detect', {});
   window._chat = r.chat_id;
   $('detected').textContent = ' found: '+r.name+' ('+r.chat_id+')';
   $('pairbtn').style.display = 'inline-block'; }
-refresh(); setInterval(refresh, 15000);
+refresh(); loadChat(); setInterval(refresh, 15000);
 </script></body></html>"""
 
 
@@ -612,6 +704,8 @@ def make_handler(dash: Dash):
                     self._json(dash.status())
                 elif self.path == "/api/findings":
                     self._json(dash.findings())
+                elif self.path == "/api/chat/history":
+                    self._json(dash.chat_history())
                 else:
                     self._json({"error": "not found"}, 404)
             elif self.path.startswith("/callback"):
@@ -666,6 +760,8 @@ def make_handler(dash: Dash):
                 self._json(dash.bank_sync())
             elif self.path == "/api/brain/test":
                 self._json(dash.brain_test())
+            elif self.path == "/api/chat":
+                self._json(dash.chat(form.get("message", "")))
             elif self.path == "/api/import/csv":
                 self._json(dash.import_csv_text(form.get("name", ""),
                                                 form.get("text", "")))

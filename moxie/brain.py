@@ -204,3 +204,33 @@ class Brain:
             f"FINDINGS:\n{_fmt_findings(actions)}\n\n"
             f"TRANSACTIONS:\n{_fmt_transactions(transactions)}"
         )
+
+    def converse(self, question: str, history, transactions, actions,
+                 snapshot=None) -> str:
+        """Multi-turn chat (the dashboard panel). History is prior turns as
+        [{'role': 'user'|'assistant', 'text': …}]; only the LAST message
+        carries the money grounding, so context stays lean. The brain still
+        cannot execute anything — it talks, the Vault acts."""
+        instructions = ensure_instructions(self.config).read_text(encoding="utf-8")
+        system = instructions + _GUARDRAILS
+        grounded = (
+            f"The user says: {question}\n\n"
+            f"{self._picture(transactions, snapshot)}\n\n"
+            f"FINDINGS:\n{_fmt_findings(actions)}\n\n"
+            f"TRANSACTIONS:\n{_fmt_transactions(transactions)}"
+        )
+        turns = [{"role": t["role"], "content": t["text"]}
+                 for t in (history or [])
+                 if t.get("role") in ("user", "assistant") and t.get("text")]
+        turns.append({"role": "user", "content": grounded})
+
+        if self.ollama_model:
+            payload = {"model": self.ollama_model, "stream": False,
+                       "messages": [{"role": "system", "content": system}] + turns}
+            data = self._transport(payload)
+            return (data.get("message", {}) or {}).get("content", "").strip()
+        payload = {"model": self.config.model, "max_tokens": 800,
+                   "system": system, "messages": turns}
+        data = self._transport(payload)
+        return "".join(block.get("text", "") for block in data.get("content", [])
+                       if block.get("type") == "text").strip()

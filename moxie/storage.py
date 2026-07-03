@@ -130,6 +130,39 @@ class Store:
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row[0] if row else None
 
+    # --- dashboard chat (encrypted like everything else) ---
+    def save_chat(self, role: str, text: str) -> None:
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS chat "
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, data TEXT)")
+        self.db.execute(
+            "INSERT INTO chat (ts, data) VALUES (?, ?)",
+            (dt.datetime.now().isoformat(timespec="seconds"),
+             self._seal(json.dumps({"role": role, "text": text}))))
+        self.db.commit()
+
+    def load_chat(self, limit: int = 20) -> "list[dict]":
+        """The most recent turns, oldest first (ready to replay as context)."""
+        try:
+            rows = self.db.execute(
+                "SELECT ts, data FROM chat ORDER BY id DESC LIMIT ?",
+                (limit,)).fetchall()
+        except Exception:
+            return []
+        out = []
+        for ts, data in reversed(rows):
+            turn = json.loads(self._open(data))
+            turn["ts"] = ts
+            out.append(turn)
+        return out
+
+    def clear_chat(self) -> None:
+        try:
+            self.db.execute("DELETE FROM chat")
+            self.db.commit()
+        except Exception:
+            pass
+
     # --- skill stats (how often each SKILL.md was used, and how it went) ---
     def bump_skill(self, name: str, outcome: str) -> None:
         """outcome: 'used' on every execution; plus 'sent' or 'failed'."""
