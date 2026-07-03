@@ -226,7 +226,50 @@ class Dash:
 
     def bank_sync(self) -> dict:
         from .providers import sync
-        return sync(self.config, self.store, self.audit)
+        return sync(self.config, self.store, self.audit,
+                    transport=self._provider_transport)
+
+    def bank_start(self, provider_name: str) -> dict:
+        """Begin a read-only bank link from the browser: returns the consent
+        URL to open and remembers the in-flight state for bank_complete."""
+        from .providers import get_provider
+        try:
+            provider = get_provider(provider_name, self.config,
+                                    transport=self._provider_transport)
+        except ValueError as e:
+            return {"error": str(e)}
+        try:
+            started = provider.start_link()
+        except Exception as e:
+            return {"error": f"couldn't start the link: {e}"}
+        if started.get("error"):
+            return started
+        self._pending_link = {"provider": provider.name,
+                              "state": started.get("state", {})}
+        return {"provider": provider.name, "url": started.get("url", ""),
+                "hint": started.get("hint", "")}
+
+    def bank_complete(self, code: str) -> dict:
+        """Exchange the consent result, persist the link, and sync once —
+        the same flow as `moxie connect`, minus the terminal."""
+        from .providers import BankLink, get_provider
+        pending = getattr(self, "_pending_link", None)
+        if not pending:
+            return {"error": "start a bank link first (pick a provider and connect)"}
+        provider = get_provider(pending["provider"], self.config,
+                                transport=self._provider_transport)
+        try:
+            state = provider.complete_link(code or "", pending["state"])
+        except Exception as e:
+            return {"error": f"link failed: {e}"}
+        BankLink(self.config).save(state)
+        self.audit.append("bank_linked", {"provider": provider.name,
+                                          "accounts": len(state.get("accounts", []))})
+        self._pending_link = None
+        out = self.bank_sync()
+        out["linked"] = True
+        out["provider"] = provider.name
+        return out
 
     def findings(self) -> list:
         actions = [a for a in self.store.load_actions() if a.status == "proposed"]
@@ -409,7 +452,26 @@ PAGE = """<!doctype html>
       <div class="muted" id="mode2"></div></div>
   <div class="card"><h3>Bank</h3><div class="big" id="bank"></div>
       <div class="muted" id="bank2"></div>
-      <div style="margin-top:8px"><button onclick="syncBank()">sync now</button></div></div>
+      <div style="margin-top:8px">
+        <button onclick="syncBank()">sync now</button>
+        <button onclick="toggleBankLink()">connect…</button>
+      </div>
+      <div id="bank_link_ui" style="display:none; margin-top:10px">
+        <label>Provider (read-only access — Moxie can never move money)</label>
+        <select id="bank_provider" style="width:100%; background:var(--bg); color:var(--fg);
+                border:1px solid var(--line); border-radius:7px; padding:7px 10px; font-size:13px">
+          <option value="truelayer">TrueLayer — UK default (free sandbox)</option>
+          <option value="gocardless">GoCardless — most generous free tier</option>
+          <option value="plaid">Plaid — strong US coverage</option>
+        </select>
+        <div style="margin-top:8px"><button class="primary" onclick="bankStart()">Start link</button></div>
+        <div class="muted" id="bank_hint" style="margin-top:8px"></div>
+        <div id="bank_step2" style="display:none">
+          <label>Code from the redirect page (GoCardless/Plaid: leave blank)</label>
+          <input id="bank_code" placeholder="paste code…">
+          <div style="margin-top:8px"><button class="primary" onclick="bankComplete()">Complete link</button></div>
+        </div>
+      </div></div>
   <div class="card"><h3>This month</h3><div class="big" id="money"></div>
       <div class="muted" id="money2"></div></div>
 </div>
@@ -615,10 +677,10 @@ async function refresh(){
   $('bank').textContent = b.linked ? (b.needs_reauth ? 're-consent' : b.provider) : 'not linked';
   $('bank').className = 'big ' + (b.linked ? (b.needs_reauth ? 'bad' : 'ok') : 'warn');
   $('bank2').textContent = b.linked
-      ? (b.needs_reauth ? 'consent expired — run: moxie connect '+b.provider
+      ? (b.needs_reauth ? 'consent expired — click connect… to re-consent'
          : b.accounts+' account(s)'+(b.consent_days_left!=null ? ' · consent ~'+b.consent_days_left+'d left' : '')
            +(b.last_sync ? ' · synced '+b.last_sync.slice(0,16) : ''))
-      : 'moxie connect truelayer · or stay no-cloud with --csv/--pdf';
+      : 'click connect… (read-only) · or import a CSV — no cloud at all';
   const mo = s.money;
   if(mo){
     $('money').textContent = mo.currency + mo.left.toFixed(2) + ' left';
@@ -655,6 +717,22 @@ async function rescan(){ const r = await api('/api/rescan', {});
   toast(r.error || ('Re-scanned: '+r.found+' finding(s), '+r.suppressed+' snoozed')); refresh(); }
 async function syncBank(){ const r = await api('/api/bank/sync', {});
   toast(r.error || ('Synced '+r.transactions+' transaction(s) from '+r.provider)); refresh(); }
+function toggleBankLink(){ const u=$('bank_link_ui');
+  u.style.display = u.style.display==='none' ? 'block' : 'none'; }
+async function bankStart(){
+  $('bank_hint').textContent = 'starting…';
+  const r = await api('/api/bank/start', {provider: val('bank_provider')});
+  if(r.error){ $('bank_hint').textContent = '✗ '+r.error; return; }
+  $('bank_hint').innerHTML = '1 · <a href="'+r.url+'" target="_blank" rel="noopener" '+
+    'style="color:var(--orange)">Open your bank consent page ↗</a><br>2 · '+esc(r.hint);
+  $('bank_step2').style.display = 'block';
+}
+async function bankComplete(){
+  const r = await api('/api/bank/complete', {code: val('bank_code')});
+  if(r.error){ toast('✗ '+r.error); return; }
+  toast('✓ Linked via '+r.provider+' — synced '+(r.transactions||0)+' transaction(s)');
+  $('bank_link_ui').style.display='none'; refresh();
+}
 async function save(kv){ const r = await api('/api/setup', kv);
   toast(r.error || ('Saved: '+r.saved.join(', '))); refresh(); }
 async function detect(){ const r = await api('/api/telegram/detect', {});
@@ -758,6 +836,10 @@ def make_handler(dash: Dash):
                 self._json(dash.detect_chat())
             elif self.path == "/api/bank/sync":
                 self._json(dash.bank_sync())
+            elif self.path == "/api/bank/start":
+                self._json(dash.bank_start(form.get("provider", "")))
+            elif self.path == "/api/bank/complete":
+                self._json(dash.bank_complete(form.get("code", "")))
             elif self.path == "/api/brain/test":
                 self._json(dash.brain_test())
             elif self.path == "/api/chat":
