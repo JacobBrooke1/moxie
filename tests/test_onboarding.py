@@ -154,6 +154,28 @@ def test_wizard_done_persists(ctx):
         srv.shutdown()
 
 
+def test_favicon_served_locally(ctx):
+    srv, base = _server(ctx)
+    try:
+        with urllib.request.urlopen(base + "/favicon.svg", timeout=10) as r:
+            assert r.headers["Content-Type"] == "image/svg+xml"
+            assert b"<svg" in r.read()
+    finally:
+        srv.shutdown()
+
+
+def test_page_is_mobile_ready(ctx):
+    srv, base = _server(ctx)
+    try:
+        with urllib.request.urlopen(base + "/", timeout=10) as r:
+            html = r.read().decode()
+        assert 'name="viewport"' in html
+        assert "@media (max-width: 640px)" in html
+        assert '<link rel="icon" href="/favicon.svg"' in html
+    finally:
+        srv.shutdown()
+
+
 # ---------------------------------------------------------------- browser ---
 def test_browser_open_respects_no_browser_env(monkeypatch):
     monkeypatch.setenv("MOXIE_NO_BROWSER", "1")

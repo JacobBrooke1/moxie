@@ -451,6 +451,7 @@ class Dash:
 PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Moxie Dash</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
   :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --fg:#e6edf3;
           --dim:#8b949e; --orange:#e8862e; --green:#3fb950; --red:#f85149; }
@@ -493,6 +494,17 @@ PAGE = """<!doctype html>
   .filebtn { display:inline-block; border:1px solid var(--line); border-radius:7px;
              padding:5px 12px; cursor:pointer; font-size:13px; }
   .filebtn:hover { border-color:var(--orange); color:var(--orange); }
+  @media (max-width: 640px) {
+    body { padding:14px; }
+    h1 { font-size:19px; }
+    .grid { grid-template-columns:1fr 1fr; gap:10px; }
+    .card { padding:12px; }
+    button, .filebtn { padding:9px 14px; }   /* thumbs, not cursors */
+    td { padding:8px 6px; }
+    table { display:block; overflow-x:auto; }
+    #chatlog { max-height:260px; }
+    #toast { left:14px; right:14px; }
+  }
 </style></head><body>
 <h1>🦡 <span>Moxie</span> Dash</h1>
 <div class="sub">The trusted surface. Keys and pairing live here — never over chat. · v<span id="ver"></span></div>
@@ -874,9 +886,20 @@ refresh(); loadChat(); setInterval(refresh, 15000);
 </script></body></html>"""
 
 
+FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<g fill="#E8862E"><ellipse cx="34" cy="34" rx="21" ry="12"/>
+<circle cx="15" cy="32" r="9"/><path d="M10 29 L4 33 L11 37 Z"/>
+<rect x="20" y="38" width="7" height="14" rx="3"/>
+<rect x="42" y="38" width="7" height="14" rx="3"/>
+<ellipse cx="56" cy="25" rx="10" ry="5" transform="rotate(-24 56 25)"/></g>
+<path fill="#F4EDE2" d="M14 26 C22 21 32 20 40 22 C48 23 54 25 60 22
+C58 28 52 31 46 31 C38 32 26 31 18 30 C15 29 14 28 14 26 Z"/>
+<circle cx="12" cy="30" r="1.6" fill="#F4EDE2"/></svg>"""
+
 LOGIN_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Moxie — sign in</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
   body { background:#0d1117; color:#e6edf3; font:15px/1.5 system-ui,sans-serif;
          display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
@@ -987,6 +1010,14 @@ def make_handler(dash: Dash):
                     self._json(dash.activity())
                 else:
                     self._json({"error": "not found"}, 404)
+            elif self.path == "/favicon.svg" or self.path == "/favicon.ico":
+                body = FAVICON.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "max-age=86400")
+                self.end_headers()
+                self.wfile.write(body)
             elif self.path.startswith("/callback"):
                 # OAuth landing for bank consent: show the code to paste into
                 # `moxie connect` — this page never stores or logs it.
