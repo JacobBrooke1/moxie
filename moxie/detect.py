@@ -47,11 +47,18 @@ FX_KEYWORDS = re.compile(
 SERVICE_CATEGORIES = {
     "streaming": ("netflix", "disney", "prime video", "primevideo", "hulu",
                   "hbo", "paramount", "peacock", "apple tv", "appletv",
-                  "now tv", "nowtv", "streammax", "crunchyroll"),
+                  "now tv", "nowtv", "streammax", "crunchyroll", "itvx",
+                  "discovery+", "discovery plus", "youtube premium"),
     "music": ("spotify", "apple music", "tidal", "deezer", "youtube music",
               "amazon music"),
-    "cloud storage": ("dropbox", "google one", "icloud", "onedrive", "pcloud"),
+    "cloud storage": ("dropbox", "google one", "icloud", "onedrive", "pcloud",
+                       "mega"),
     "gym": ("gym", "fitness", "fitclub", "peloton", "david lloyd", "nuffield"),
+    "audiobooks": ("audible", "bookbeat"),
+    "meal kits": ("hellofresh", "gousto"),
+    "vpn": ("nordvpn", "expressvpn", "surfshark", "protonvpn"),
+    "news": ("the times", "the guardian", "new york times", "nytimes",
+             "financial times", "the economist"),
 }
 
 
