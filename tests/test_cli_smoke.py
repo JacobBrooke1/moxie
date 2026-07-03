@@ -50,3 +50,12 @@ def test_kill_switch_round_trip(tmp_path):
     assert out.returncode == 0 and "ENGAGED" in out.stdout
     out = _run(["kill", "--release"], home)
     assert out.returncode == 0 and "released" in out.stdout
+
+
+def test_bare_moxie_in_a_pipe_prints_help_not_a_server(tmp_path):
+    """Non-interactive `moxie` must never sprout a web server — it prints
+    help plus the front-door pointer and exits."""
+    out = _run([], tmp_path / "home")
+    assert out.returncode == 0
+    assert "usage:" in out.stdout
+    assert "moxie dashboard" in out.stdout

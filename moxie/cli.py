@@ -544,9 +544,22 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):
-        parser.print_help()
+        if _no_command_action() == "dashboard":
+            print("No command given — opening your dashboard (the front door).")
+            print("Power users: `moxie --help` lists every command.\n")
+            args.port = 8484
+            cmd_dashboard(args)
+        else:
+            parser.print_help()
+            print("\nNew here? Run  moxie dashboard  — set up everything from your browser.")
         return
     args.func(args)
+
+
+def _no_command_action() -> str:
+    """Bare `moxie` on an interactive terminal opens the dashboard (the
+    front door); in pipes/CI it prints help — scripts never sprout servers."""
+    return "dashboard" if (sys.stdin.isatty() and sys.stdout.isatty()) else "help"
 
 
 if __name__ == "__main__":

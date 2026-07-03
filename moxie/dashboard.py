@@ -53,13 +53,19 @@ def _update_env_file(path, updates: dict) -> None:
 
 
 class Dash:
-    """State + API logic, separated from HTTP plumbing for testability."""
+    """State + API logic, separated from HTTP plumbing for testability.
 
-    def __init__(self, config, store, audit):
+    `brain_transport` / `provider_transport` are injectable fakes for tests —
+    the same pattern as everywhere else in Moxie."""
+
+    def __init__(self, config, store, audit, brain_transport=None,
+                 provider_transport=None):
         self.config = config
         self.store = store
         self.audit = audit
         self.agent = Agent(config, store, audit)
+        self._brain_transport = brain_transport
+        self._provider_transport = provider_transport
 
     # ---- status ------------------------------------------------------------
     def status(self) -> dict:
@@ -100,7 +106,69 @@ class Dash:
             },
             "bank": self._bank_status(),
             "money": self._money(),
+            "setup": self.setup_state(),
         }
+
+    # ---- onboarding (the front door) ----------------------------------------
+    def setup_state(self) -> dict:
+        """What the first-run wizard needs to know: what's configured, and
+        whether the user has finished/skipped the wizard."""
+        return {
+            "brain_ready": Brain(self.config).available,
+            "has_data": bool(self.store.load_transactions()),
+            "telegram_paired": bool(self.config.telegram_chat_id),
+            "wizard_done": self.store.get_meta("wizard_done") == "1",
+        }
+
+    def wizard_done(self) -> dict:
+        self.store.set_meta("wizard_done", "1")
+        self.audit.append("wizard_done", {})
+        return {"ok": True}
+
+    def brain_test(self) -> dict:
+        """One tiny live call to prove the key/model works — the wizard's
+        'test my key' button. Uses the injectable transport in tests."""
+        brain = Brain(self.config, transport=self._brain_transport)
+        if not brain.available:
+            return {"ok": False,
+                    "error": "no key saved yet (and no local Ollama model configured)"}
+        try:
+            reply = brain.ask("Reply with the single word: ready", [], [])
+        except Exception as e:
+            return {"ok": False, "error": f"the key didn't work: {e}"}
+        self.audit.append("brain_tested", {"ok": True})
+        return {"ok": True, "model": self.config.model,
+                "reply": (reply or "")[:80]}
+
+    def import_csv_text(self, name: str, text: str) -> dict:
+        """In-browser CSV import: the file is read client-side and its text
+        POSTed here — it never needs to touch disk."""
+        from .connectors import import_csv_text
+        if not (text or "").strip():
+            return {"error": "empty file"}
+        try:
+            txns = import_csv_text(text)
+        except ValueError as e:
+            return {"error": str(e)}
+        if not txns:
+            return {"error": "no transactions recognised in that CSV"}
+        self.store.save_transactions(txns)
+        actions = self.agent.scan(txns)
+        self.audit.append("csv_imported", {"name": (name or "upload.csv")[:80],
+                                           "transactions": len(txns)})
+        return {"transactions": len(txns), "found": len(actions),
+                "suppressed": self.agent.last_suppressed}
+
+    def load_sample_data(self) -> dict:
+        """The zero-risk demo: bundled fictional data, same pipeline."""
+        from .sampledata import sample_receipts, sample_transactions
+        txns = sample_transactions()
+        self.store.save_transactions(txns)
+        for r in sample_receipts():
+            self.store.save_receipt(r)
+        actions = self.agent.scan(txns)
+        self.audit.append("sample_data_loaded", {"transactions": len(txns)})
+        return {"transactions": len(txns), "found": len(actions), "sample": True}
 
     def _money(self) -> "dict | None":
         from .snapshot import snapshot_from_store
@@ -215,10 +283,79 @@ PAGE = """<!doctype html>
            border:1px solid var(--orange); border-radius:8px; padding:10px 16px;
            display:none; font-size:13px; }
   .note { font-size:12px; color:var(--dim); margin-top:16px; }
+  .wstep { border-top:1px solid var(--line); padding:16px 0; }
+  .wstep h3 { font-size:14px; text-transform:none; letter-spacing:0;
+              color:var(--fg); margin-bottom:6px; }
+  .tick { display:inline-flex; align-items:center; justify-content:center;
+          width:22px; height:22px; border-radius:50%; border:1px solid var(--line);
+          font-size:12px; margin-right:8px; color:var(--dim); }
+  .tick.done { background:var(--green); border-color:var(--green);
+               color:#0d1117; font-weight:700; }
+  .filebtn { display:inline-block; border:1px solid var(--line); border-radius:7px;
+             padding:5px 12px; cursor:pointer; font-size:13px; }
+  .filebtn:hover { border-color:var(--orange); color:var(--orange); }
 </style></head><body>
 <h1>🦡 <span>Moxie</span> Dash</h1>
 <div class="sub">The trusted surface. Keys and pairing live here — never over chat. · v<span id="ver"></span></div>
 
+<div id="wizard" style="display:none; max-width:720px; margin:10px auto 30px;">
+  <div class="card" style="padding:22px">
+    <h2 style="margin:0 0 6px">Welcome. Three steps and Moxie is yours.</h2>
+    <div class="muted" style="margin-bottom:18px">Everything below stays on this
+      machine — keys go in <code>~/.moxie</code>, never to any server of ours.</div>
+
+    <div class="wstep" id="w1">
+      <h3><span class="tick" id="w1t">1</span> Connect your Claude API key</h3>
+      <div class="muted">Get one at console.anthropic.com → API keys. This powers
+        the brain: triage, chat, "can I afford this?".</div>
+      <label>Anthropic API key</label>
+      <input id="w_api" type="password" placeholder="sk-ant-…">
+      <div style="margin-top:8px">
+        <button class="primary" onclick="wizKey()">Save & test key</button>
+        <span class="muted" id="w1msg"></span>
+      </div>
+      <div class="muted" style="margin-top:6px">No key? Moxie also runs a local model
+        (<code>MOXIE_MODEL=ollama:llama3.1</code>) or rules-only — you can skip this.</div>
+    </div>
+
+    <div class="wstep" id="w2">
+      <h3><span class="tick" id="w2t">2</span> Get your transactions in</h3>
+      <div class="muted">Read-only, local. Pick whichever you like:</div>
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+        <label class="filebtn"><input type="file" id="w_csv" accept=".csv"
+          style="display:none" onchange="wizCsv(this)">Import a bank CSV…</label>
+        <button onclick="wizDemo()">Try with sample data</button>
+        <span class="muted" id="w2msg"></span>
+      </div>
+      <div class="muted" style="margin-top:6px">Your file is read in the browser and
+        parsed locally — it isn't uploaded anywhere. Bank statements export CSV from
+        your online banking. (Live bank linking: the Bank card, after setup.)</div>
+    </div>
+
+    <div class="wstep" id="w3">
+      <h3><span class="tick" id="w3t">3</span> Telegram — optional, but great</h3>
+      <div class="muted">Text Moxie like a PA and approve findings from your phone.
+        Make a bot with @BotFather, paste its token:</div>
+      <label>Bot token</label>
+      <input id="w_tok" type="password" placeholder="123456:ABC…">
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+        <button onclick="wizTok()">Save token</button>
+        <button onclick="wizDetect()">Detect my chat id</button>
+        <button class="primary" id="w_pair" style="display:none"
+          onclick="wizPair()">Pair this chat</button>
+      </div>
+      <div class="muted" id="w3msg" style="margin-top:6px">After saving, message your
+        bot anything, then click detect.</div>
+    </div>
+
+    <div style="margin-top:18px; display:flex; gap:10px; align-items:center">
+      <button class="primary" onclick="wizFinish()">Finish setup →</button>
+      <a href="#" class="muted" onclick="wizFinish(); return false">skip for now</a>
+    </div>
+  </div>
+</div>
+
+<div id="main">
 <div class="grid">
   <div class="card"><h3>Heartbeat</h3><div class="big ok" id="hb">●</div>
       <div class="muted" id="hb2"></div></div>
@@ -267,6 +404,7 @@ PAGE = """<!doctype html>
 <div class="note">Dashboard binds to 127.0.0.1 only. On a remote host use an SSH tunnel:
 <code>ssh -L 8484:127.0.0.1:8484 you@host</code>. Moxie never moves money; every action needs your approval,
 and nothing sends unless MOXIE_LIVE=true.</div>
+</div><!-- /main -->
 <div id="toast"></div>
 
 <div id="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6);
@@ -302,8 +440,66 @@ async function api(path, body){
   }
   return r.json(); }
 
+function wizardToggle(setup){
+  const fresh = setup && !setup.wizard_done && !(setup.brain_ready && setup.has_data);
+  $('wizard').style.display = fresh ? 'block' : 'none';
+  $('main').style.display = fresh ? 'none' : 'block';
+  if(!fresh) return;
+  const tick = (id, done, n) => { const el=$(id);
+    el.textContent = done ? '✓' : n; el.className = 'tick' + (done ? ' done' : ''); };
+  tick('w1t', setup.brain_ready, '1');
+  tick('w2t', setup.has_data, '2');
+  tick('w3t', setup.telegram_paired, '3');
+}
+async function wizKey(){
+  $('w1msg').textContent = ' saving…';
+  const r = await api('/api/setup', {MOXIE_API_KEY: val('w_api')});
+  if(r.error){ $('w1msg').textContent = ' ' + r.error; return; }
+  $('w1msg').textContent = ' testing the key…';
+  const t = await api('/api/brain/test', {});
+  $('w1msg').textContent = t.ok ? ' ✓ key works ('+t.model+')' : ' ✗ '+t.error;
+  refresh();
+}
+function wizCsv(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  $('w2msg').textContent = ' reading '+file.name+'…';
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const r = await api('/api/import/csv', {name: file.name, text: reader.result});
+    $('w2msg').textContent = r.error ? ' ✗ '+r.error
+      : ' ✓ '+r.transactions+' transactions, '+r.found+' finding(s)';
+    refresh();
+  };
+  reader.readAsText(file);
+}
+async function wizDemo(){
+  const r = await api('/api/demo', {});
+  $('w2msg').textContent = r.error ? ' ✗ '+r.error
+    : ' ✓ sample data loaded — '+r.found+' finding(s) to explore';
+  refresh();
+}
+async function wizTok(){
+  const r = await api('/api/setup', {TELEGRAM_BOT_TOKEN: val('w_tok')});
+  $('w3msg').textContent = r.error || 'Token saved. Message your bot anything, then click detect.';
+}
+async function wizDetect(){
+  const r = await api('/api/telegram/detect', {});
+  if(r.error){ $('w3msg').textContent = r.error; return; }
+  window._chat = r.chat_id;
+  $('w3msg').textContent = 'Found: '+r.name+' ('+r.chat_id+') — now pair it.';
+  $('w_pair').style.display = 'inline-block';
+}
+async function wizPair(){
+  const r = await api('/api/setup', {MOXIE_TELEGRAM_CHAT_ID: window._chat});
+  $('w3msg').textContent = r.error || '✓ Paired. Run `moxie telegram` (or `moxie serve`) to bring the bot online.';
+  refresh();
+}
+async function wizFinish(){ await api('/api/wizard/done', {}); refresh(); }
+
 async function refresh(){
   const s = await api('/api/status');
+  wizardToggle(s.setup);
   $('ver').textContent = s.version;
   $('hb2').textContent = 'last event: ' + (s.heartbeat.last_event||'—') +
       (s.heartbeat.last_daily_scan ? ' · daily scan: '+s.heartbeat.last_daily_scan : '');
@@ -468,22 +664,56 @@ def make_handler(dash: Dash):
                 self._json(dash.detect_chat())
             elif self.path == "/api/bank/sync":
                 self._json(dash.bank_sync())
+            elif self.path == "/api/brain/test":
+                self._json(dash.brain_test())
+            elif self.path == "/api/import/csv":
+                self._json(dash.import_csv_text(form.get("name", ""),
+                                                form.get("text", "")))
+            elif self.path == "/api/demo":
+                self._json(dash.load_sample_data())
+            elif self.path == "/api/wizard/done":
+                self._json(dash.wizard_done())
             else:
                 self._json({"error": "not found"}, 404)
 
     return Handler
 
 
-def serve(config, store, audit, port: int = 8484, host: str = "127.0.0.1"):
-    dash = Dash(config, store, audit)
+def serve(config, store, audit, port: int = 8484, host: str = "127.0.0.1",
+          dash: "Dash | None" = None):
+    dash = dash or Dash(config, store, audit)
     server = ThreadingHTTPServer((host, port), make_handler(dash))
     return server
 
 
-def run_dashboard(config, store, audit, port: int = 8484):
+def maybe_open_browser(url: str, force: "bool | None" = None) -> bool:
+    """Open the user's browser at the dashboard — the one-command front door.
+    Skipped when MOXIE_NO_BROWSER is set or there's no interactive terminal
+    (CI, ssh, service units), so servers never spawn browsers."""
+    import os
+    import sys
+    import webbrowser
+    if force is None:
+        if os.environ.get("MOXIE_NO_BROWSER", "").lower() in ("1", "true", "yes"):
+            return False
+        if not (sys.stdout.isatty() and sys.stdin.isatty()):
+            return False
+    elif not force:
+        return False
+    try:
+        return bool(webbrowser.open(url))
+    except Exception:
+        return False
+
+
+def run_dashboard(config, store, audit, port: int = 8484, open_browser=None):
     server = serve(config, store, audit, port=port)
-    print(f"🦡 Moxie Dash: http://127.0.0.1:{port}   (Ctrl-C to stop)")
-    print("   Remote box? Tunnel it:  ssh -L {0}:127.0.0.1:{0} you@host".format(port))
+    actual = server.server_address[1]
+    url = f"http://127.0.0.1:{actual}"
+    print(f"🦡 Moxie Dash: {url}   (Ctrl-C to stop)")
+    print("   Remote box? Tunnel it:  ssh -L {0}:127.0.0.1:{0} you@host".format(actual))
+    if maybe_open_browser(url, force=open_browser):
+        print("   (opened in your browser — do everything from there)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -53,41 +53,37 @@ Look at who already touches your money:
 
 ## Quickstart
 
-```bash
-# install
-pip install moxie-agent   # from PyPI
-# …or from source:  git clone https://github.com/JacobBrooke1/moxie.git && cd moxie && pip install -e .
+Two commands. Everything else happens in your browser.
 
-# try it with built-in sample data — no bank, no API key needed
-# (Windows: if `moxie` isn't recognized, pip's Scripts dir isn't on PATH —
-#  use `python -m moxie <command>` instead; works everywhere)
-moxie init
-moxie scan            # finds issues in sample transactions
-moxie review          # shows each fix, asks you to approve, then drafts it
+```bash
+pip install moxie-agent   # or from source:  git clone https://github.com/JacobBrooke1/moxie.git && cd moxie && pip install -e .
+moxie dashboard           # ← your browser opens; do everything from there
+```
+
+The dashboard walks you through setup in three steps, all on your machine:
+
+1. **Connect your Claude API key** — pasted locally, tested live, stored in `~/.moxie` (or skip it: Moxie also runs a local Ollama model, or rules-only).
+2. **Get your transactions in** — drop in any bank CSV (parsed in the browser, read-only) or click **"Try with sample data"** to see the whole consent-first loop with no bank and no key.
+3. **Pair Telegram** *(optional)* — text Moxie like a PA and approve findings from your phone.
+
+Works the same locally or on a VPS (see [docs/HOSTING.md](docs/HOSTING.md)). If `moxie` isn't recognized on Windows, use `python -m moxie dashboard` — pip's Scripts dir isn't on PATH; both work everywhere.
+
+<details>
+<summary><b>Prefer the terminal?</b> The full CLI (power users & automation)</summary>
+
+```bash
+moxie init            # set up ~/.moxie
+moxie scan            # find issues (add --csv statement.csv or --pdf statement.pdf)
+moxie review          # approve or skip each fix — nothing sends without your yes
+moxie budget          # this month: in / out / left
+moxie connect truelayer   # link a bank read-only (or gocardless / plaid)
+moxie sync            # pull fresh transactions + balances
 moxie log             # the tamper-evident audit trail
-moxie verify          # confirms the log hasn't been altered
-moxie doctor          # checks your setup: python, key, audit, skills
+moxie verify          # confirm the log hasn't been altered
+moxie doctor          # check your whole setup
 ```
 
-The demo runs entirely on bundled sample data so you can see the consent-first loop end to end before connecting anything real.
-
-Ready for your real data? Both paths are local and read-only — nothing leaves your machine:
-
-```bash
-moxie scan --csv statement.csv    # any bank CSV export — headers auto-detected
-moxie scan --pdf statement.pdf    # bank statement PDFs (NatWest-style; pip install pypdf)
-```
-
-Or link your bank for automatic read-only imports — **your choice of provider**, bring your own (free) credentials:
-
-```bash
-moxie connect truelayer     # UK default (NatWest etc.; free sandbox at console.truelayer.com)
-moxie connect gocardless    # most generous free tier (bankaccountdata.gocardless.com)
-moxie connect plaid         # strong US coverage (dashboard.plaid.com)
-moxie sync                  # pull fresh transactions + balances any time
-```
-
-Honesty note: every aggregator is a cloud third party. *You* hold the provider account (Moxie the project runs no servers), access is read-only AIS — Moxie cannot move money by construction — and CSV/PDF remains the fully no-cloud path. UK consents lapse ~90 days; `moxie doctor` and the dashboard tell you when to re-consent.
+Bank linking honesty note: every aggregator is a cloud third party. *You* hold the provider account (Moxie the project runs no servers), access is read-only AIS — Moxie cannot move money by construction — and CSV/PDF stays the fully no-cloud path. UK consents lapse ~90 days; the dashboard and `moxie doctor` tell you when to re-consent.
 
 **Going live** (optional — everything works drafts-only without this): approving an action really sends it only when you flip the flag *and* configure your own mailbox:
 
@@ -103,6 +99,8 @@ moxie kill                        # panic button: force drafts-only until --rele
 ```
 
 Cancellations that work better on the merchant's website use **guided deep-links**: Moxie shows the exact URL and clicks (from the merchant's skill) and *you* do the final click — no passwords, no CAPTCHA fights.
+
+</details>
 
 > ⚠️ **Status:** feature-complete, pre-review. The Trust Vault, live action layer, bank providers, receipts, and the security hardening checklist (encryption at rest, OS keychain, dashboard token/CSRF, rate limiting) are all implemented and tested. What's missing is an **independent security review** — until then, use your own judgment with real financial data, keep `MOXIE_LIVE` off unless you've read the code, and see [SECURITY.md](SECURITY.md) for exactly where the edges are.
 

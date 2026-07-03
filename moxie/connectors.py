@@ -112,65 +112,77 @@ def _pick(headers: "list[str]", candidates: "list[str]", *, exclude: "set[str]" 
 
 
 def import_csv(path: str, currency: "str | None" = None) -> "list[Transaction]":
-    """Import a real bank CSV export. Returns transactions with spend positive,
-    credits/refunds negative, ISO dates, and normalised merchant names."""
+    """Import a real bank CSV export from a file. Returns transactions with
+    spend positive, credits/refunds negative, ISO dates, and normalised
+    merchant names."""
     with open(path, newline="", encoding="utf-8-sig") as f:
-        sample = f.read(4096)
-        f.seek(0)
-        try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-        except csv.Error:
-            dialect = csv.excel
-        reader = csv.DictReader(f, dialect=dialect)
-        headers = reader.fieldnames or []
+        return _import_csv_stream(f, currency)
 
-        date_col = _pick(headers, _DATE_COLS)
-        merch_col = _pick(headers, _MERCHANT_COLS)
-        amount_col = _pick(headers, _AMOUNT_COLS)
-        out_col = _pick(headers, _OUT_COLS)
-        in_col = _pick(headers, _IN_COLS)
-        desc_col = _pick(headers, _DESC_COLS, exclude={merch_col} if merch_col else frozenset())
 
-        missing = [
-            label for label, col in
-            (("date", date_col), ("merchant/description", merch_col))
-            if col is None
-        ]
-        if amount_col is None and out_col is None:
-            missing.append("amount (or Money Out / Money In)")
-        if missing:
-            raise ValueError(
-                f"Couldn't find column(s) for: {', '.join(missing)}. "
-                f"Headers seen: {headers}. Rename columns or export a different format."
+def import_csv_text(text: str, currency: "str | None" = None) -> "list[Transaction]":
+    """Same importer over CSV text already in memory — the dashboard's
+    in-browser upload path (the file never touches disk)."""
+    import io
+    return _import_csv_stream(io.StringIO(text.lstrip("﻿")), currency)
+
+
+def _import_csv_stream(f, currency: "str | None" = None) -> "list[Transaction]":
+    sample = f.read(4096)
+    f.seek(0)
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(f, dialect=dialect)
+    headers = reader.fieldnames or []
+
+    date_col = _pick(headers, _DATE_COLS)
+    merch_col = _pick(headers, _MERCHANT_COLS)
+    amount_col = _pick(headers, _AMOUNT_COLS)
+    out_col = _pick(headers, _OUT_COLS)
+    in_col = _pick(headers, _IN_COLS)
+    desc_col = _pick(headers, _DESC_COLS, exclude={merch_col} if merch_col else frozenset())
+
+    missing = [
+        label for label, col in
+        (("date", date_col), ("merchant/description", merch_col))
+        if col is None
+    ]
+    if amount_col is None and out_col is None:
+        missing.append("amount (or Money Out / Money In)")
+    if missing:
+        raise ValueError(
+            f"Couldn't find column(s) for: {', '.join(missing)}. "
+            f"Headers seen: {headers}. Rename columns or export a different format."
+        )
+
+    if currency is None:
+        joined = " ".join(h.lower() for h in headers)
+        currency = "£" if ("gbp" in joined or "£" in sample) else ("$" if "$" in sample else "£")
+
+    txns = []
+    for row in reader:
+        raw_merchant = (row.get(merch_col) or "").strip()
+        raw_date = (row.get(date_col) or "").strip()
+        if not raw_date or not raw_merchant:
+            continue
+        if amount_col is not None:
+            amount = _parse_amount(row.get(amount_col, ""))
+        else:
+            out_v = _parse_amount(row.get(out_col, "")) if out_col else 0.0
+            in_v = _parse_amount(row.get(in_col, "")) if in_col else 0.0
+            amount = out_v if out_v else -in_v
+        if amount == 0.0:
+            continue
+        txns.append(
+            Transaction(
+                date=_parse_date(raw_date),
+                merchant=normalize_merchant(raw_merchant),
+                amount=round(amount, 2),
+                description=(row.get(desc_col) or "").strip() if desc_col else raw_merchant,
+                currency=currency,
             )
-
-        if currency is None:
-            joined = " ".join(h.lower() for h in headers)
-            currency = "£" if ("gbp" in joined or "£" in sample) else ("$" if "$" in sample else "£")
-
-        txns = []
-        for row in reader:
-            raw_merchant = (row.get(merch_col) or "").strip()
-            raw_date = (row.get(date_col) or "").strip()
-            if not raw_date or not raw_merchant:
-                continue
-            if amount_col is not None:
-                amount = _parse_amount(row.get(amount_col, ""))
-            else:
-                out_v = _parse_amount(row.get(out_col, "")) if out_col else 0.0
-                in_v = _parse_amount(row.get(in_col, "")) if in_col else 0.0
-                amount = out_v if out_v else -in_v
-            if amount == 0.0:
-                continue
-            txns.append(
-                Transaction(
-                    date=_parse_date(raw_date),
-                    merchant=normalize_merchant(raw_merchant),
-                    amount=round(amount, 2),
-                    description=(row.get(desc_col) or "").strip() if desc_col else raw_merchant,
-                    currency=currency,
-                )
-            )
+        )
 
     # Sign convention: many banks export spending as negative. If most nonzero
     # rows are negative, flip so that spend is positive, credits negative.
