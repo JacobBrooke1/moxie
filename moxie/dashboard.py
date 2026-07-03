@@ -66,6 +66,36 @@ class Dash:
         self.agent = Agent(config, store, audit)
         self._brain_transport = brain_transport
         self._provider_transport = provider_transport
+        self._sessions = set()      # login cookies for token-protected mode
+        self._login_fails = []      # monotonic timestamps, for rate limiting
+
+    # ---- login (only when MOXIE_DASH_TOKEN is set) ---------------------------
+    def login(self, attempt: str) -> dict:
+        """Trade the shared token for a session cookie. Constant-time compare,
+        five failures a minute max — this is the hosted-mode front gate."""
+        import hmac
+        import os
+        import secrets
+        import time
+        token = os.environ.get("MOXIE_DASH_TOKEN", "")
+        if not token:
+            return {"error": "no token is configured — the dashboard is open on localhost"}
+        now = time.monotonic()
+        self._login_fails = [t for t in self._login_fails if now - t < 60]
+        if len(self._login_fails) >= 5:
+            return {"error": "too many attempts — wait a minute", "locked": True}
+        if not hmac.compare_digest((attempt or "").strip(), token):
+            self._login_fails.append(now)
+            self.audit.append("login_failed", {})
+            return {"error": "wrong token"}
+        session = secrets.token_urlsafe(32)
+        self._sessions.add(session)
+        self.audit.append("login_ok", {})
+        return {"ok": True, "session": session}
+
+    def logout(self, session: str) -> dict:
+        self._sessions.discard(session or "")
+        return {"ok": True}
 
     # ---- status ------------------------------------------------------------
     def status(self) -> dict:
@@ -635,15 +665,11 @@ function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='blo
   setTimeout(()=>t.style.display='none', 4000); }
 async function api(path, body){
   const headers = {'X-Moxie':'1'};
-  const tok = sessionStorage.getItem('moxie_token');
-  if(tok) headers['Authorization'] = 'Bearer '+tok;
   const opts = body ? {method:'POST', headers, body: JSON.stringify(body)} : {headers};
   let r = await fetch(path, opts);
-  if(r.status === 401){
-    const t = prompt('This dash is token-protected (MOXIE_DASH_TOKEN). Enter the token:');
-    if(t){ sessionStorage.setItem('moxie_token', t); return api(path, body); }
-  }
+  if(r.status === 401){ location.reload(); return {}; }  // server shows the login page
   return r.json(); }
+async function logout(){ await api('/api/logout', {}); location.reload(); }
 
 function wizardToggle(setup){
   const fresh = setup && !setup.wizard_done && !(setup.brain_ready && setup.has_data);
@@ -848,36 +874,105 @@ refresh(); loadChat(); setInterval(refresh, 15000);
 </script></body></html>"""
 
 
+LOGIN_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Moxie — sign in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { background:#0d1117; color:#e6edf3; font:15px/1.5 system-ui,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:12px;
+          padding:28px; width:min(92%,380px); }
+  h1 { font-size:20px; margin:0 0 6px; } h1 span{color:#e8862e;}
+  p { color:#8b949e; font-size:13px; margin:0 0 16px; }
+  input { width:100%; background:#0d1117; border:1px solid #30363d; color:#e6edf3;
+          border-radius:7px; padding:9px 12px; font-size:14px; box-sizing:border-box; }
+  button { width:100%; margin-top:10px; background:#e8862e; border:none; color:#0d1117;
+           font-weight:600; border-radius:7px; padding:9px; font-size:14px; cursor:pointer; }
+  #msg { color:#f85149; font-size:13px; margin-top:8px; min-height:18px; }
+</style></head><body>
+<div class="card">
+  <h1>🦡 <span>Moxie</span> Dash</h1>
+  <p>This dashboard is token-protected (it holds your keys and approvals).
+     Enter the MOXIE_DASH_TOKEN you configured on the server.</p>
+  <input id="tok" type="password" placeholder="dashboard token"
+         onkeydown="if(event.key==='Enter') go()">
+  <button onclick="go()">Sign in</button>
+  <div id="msg"></div>
+</div>
+<script>
+async function go(){
+  const r = await fetch('/api/login', {method:'POST',
+    headers:{'X-Moxie':'1'}, body: JSON.stringify({token: document.getElementById('tok').value})});
+  const out = await r.json();
+  if(out.ok){ location.reload(); }
+  else { document.getElementById('msg').textContent = out.error || 'no'; }
+}
+</script></body></html>"""
+
+
+def _check_bind_safety(host: str) -> None:
+    """The dashboard holds keys and can approve money actions. Binding it to
+    a non-loopback interface without a token would expose all of that —
+    refuse loudly instead of starting."""
+    import os
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return
+    if not os.environ.get("MOXIE_DASH_TOKEN"):
+        raise SystemExit(
+            f"Refusing to bind the dashboard to {host} without MOXIE_DASH_TOKEN.\n"
+            "This surface holds your API keys and approves money actions.\n"
+            "Set MOXIE_DASH_TOKEN=<something long and random> (you'll get a login\n"
+            "page), put TLS in front (docs/HOSTING.md), or keep it on 127.0.0.1\n"
+            "and reach it over an SSH tunnel."
+        )
+
+
 def make_handler(dash: Dash):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # keep the console quiet
             pass
 
-        def _json(self, obj, code=200):
+        def _json(self, obj, code=200, extra_headers=None):
             body = json.dumps(obj).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
+        def _html(self, page: str, code=200):
+            body = page.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _session(self) -> str:
+            from http.cookies import SimpleCookie
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+            morsel = cookie.get("moxie_session")
+            return morsel.value if morsel else ""
+
         def _auth_ok(self) -> bool:
-            """Optional bearer token (MOXIE_DASH_TOKEN) — belt for the
-            localhost braces, and required if you insist on tunnelling."""
+            """No token configured -> open on localhost (the default).
+            Token configured -> a login-session cookie or a bearer header."""
             import os
             token = os.environ.get("MOXIE_DASH_TOKEN", "")
             if not token:
                 return True
-            return self.headers.get("Authorization", "") == f"Bearer {token}"
+            if self.headers.get("Authorization", "") == f"Bearer {token}":
+                return True
+            return self._session() in dash._sessions
 
         def do_GET(self):
             if self.path == "/" or self.path.startswith("/index"):
-                body = PAGE.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                if not self._auth_ok():
+                    self._html(LOGIN_PAGE)   # the hosted-mode front gate
+                    return
+                self._html(PAGE)
             elif self.path.startswith("/api/"):
                 if not self._auth_ok():
                     self._json({"error": "unauthorized — send Authorization: "
@@ -917,9 +1012,6 @@ def make_handler(dash: Dash):
                 self._json({"error": "not found"}, 404)
 
         def do_POST(self):
-            if not self._auth_ok():
-                self._json({"error": "unauthorized"}, 401)
-                return
             # CSRF: browsers can't attach custom headers cross-origin without
             # a preflight we never approve — so requiring one blocks drive-by
             # POSTs from malicious pages targeting 127.0.0.1.
@@ -931,6 +1023,26 @@ def make_handler(dash: Dash):
                 form = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 form = {}
+
+            if self.path == "/api/login":     # reachable before auth, obviously
+                out = dash.login(form.get("token", ""))
+                if out.get("ok"):
+                    cookie = ("moxie_session=" + out.pop("session") +
+                              "; HttpOnly; SameSite=Strict; Path=/")
+                    self._json(out, extra_headers={"Set-Cookie": cookie})
+                else:
+                    self._json(out, 429 if out.get("locked") else 401)
+                return
+
+            if not self._auth_ok():
+                self._json({"error": "unauthorized"}, 401)
+                return
+
+            if self.path == "/api/logout":
+                dash.logout(self._session())
+                self._json({"ok": True}, extra_headers={
+                    "Set-Cookie": "moxie_session=gone; Max-Age=0; Path=/"})
+                return
             if self.path == "/api/resolve":
                 self._json(dash.resolve(form.get("id", ""), bool(form.get("approved")),
                                         edited_draft=form.get("draft")))
@@ -965,6 +1077,7 @@ def make_handler(dash: Dash):
 
 def serve(config, store, audit, port: int = 8484, host: str = "127.0.0.1",
           dash: "Dash | None" = None):
+    _check_bind_safety(host)
     dash = dash or Dash(config, store, audit)
     server = ThreadingHTTPServer((host, port), make_handler(dash))
     return server

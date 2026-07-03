@@ -34,9 +34,9 @@ def run_serve(config, store, audit, port: int = 8484, once: bool = False,
     actual_port = server.server_address[1]
 
     print(f"🦡 Moxie serving: dashboard http://{host}:{actual_port}")
-    if host != "127.0.0.1":
-        print("   ⚠️ Dashboard is NOT loopback-only — set MOXIE_DASH_TOKEN and "
-              "firewall this box (docs/HOSTING.md).")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print("   ⚠️ Dashboard is NOT loopback-only. Token login is enforced — "
+              "put TLS in front and firewall this box (docs/HOSTING.md).")
 
     token = config.telegram_token
     bot = Bot(config, store, audit,

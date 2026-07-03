@@ -31,8 +31,11 @@ launchctl load -w ~/Library/LaunchAgents/com.moxie.serve.plist
 Your data lives on a rented box, so two rules:
 
 - **Encrypt at rest**: `pip install "moxie-agent[secure]"` then `moxie encrypt on`.
-- **Never expose the dashboard.** It binds to 127.0.0.1; reach it via an SSH
-  tunnel — and set `MOXIE_DASH_TOKEN` anyway, belt and braces:
+- **Never expose the dashboard naked.** It binds to 127.0.0.1 by default, and
+  Moxie **refuses to start** on a non-loopback interface unless
+  `MOXIE_DASH_TOKEN` is set — the token becomes a real login page (session
+  cookie, rate-limited). Reach it via an SSH tunnel, or put a TLS reverse
+  proxy (Caddy/nginx) in front and rely on the login:
 
 ```bash
 # on the VPS

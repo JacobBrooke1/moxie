@@ -8,9 +8,10 @@
 #     moxie
 #
 # Publishing on 127.0.0.1 keeps the dash loopback-only on the HOST even
-# though it binds 0.0.0.0 inside the container. If you must expose it
-# further, set MOXIE_DASH_TOKEN. Secrets: pass via --env-file; the OS
-# keychain isn't available in a container.
+# though it binds 0.0.0.0 inside the container. MOXIE_DASH_TOKEN is
+# REQUIRED (in your .env) — Moxie refuses a non-loopback bind without it,
+# and it becomes the dashboard's login. Secrets: pass via --env-file; the
+# OS keychain isn't available in a container.
 FROM python:3.12-slim
 
 RUN useradd --create-home moxie
