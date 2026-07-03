@@ -13,5 +13,5 @@ labels: skill, good first issue
 **What you know** — the support address or cancel URL, the exact steps,
 retention traps to decline, how they confirm. First-hand experience is gold.
 
-See `skills/cancel-examplegym/SKILL.md` for the format and
+See `moxie/seed_skills/cancel-examplegym/SKILL.md` for the format and
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for the checklist.

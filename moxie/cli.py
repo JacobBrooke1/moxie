@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import os
 import sys
 from pathlib import Path
 
@@ -32,10 +31,14 @@ def _ctx(config=None):
 
 
 def _skill_dirs(args, config):
-    """Look in the repo's ./skills and the user's workspace skills (OpenClaw-style)."""
-    env_dir = os.environ.get("MOXIE_SKILLS")
-    dirs = [env_dir or getattr(args, "dir", "skills"), str(config.home / "workspace" / "skills")]
-    return [d for d in dirs if d]
+    """Everywhere Moxie looks for skills: the bundled seed library + the user's
+    workspace + any explicit --dir override (see skills.skill_search_dirs)."""
+    from .skills import skill_search_dirs
+    dirs = list(skill_search_dirs(config))
+    custom = getattr(args, "dir", None)
+    if custom and custom not in dirs:
+        dirs.insert(0, custom)
+    return dirs
 
 
 def cmd_init(args):
@@ -361,7 +364,8 @@ def cmd_skills(args):
         if Path(d).exists():
             reg.load_dir(d)
     if not reg.skills:
-        print("No skills found. Add one at  skills/<name>/SKILL.md  — see skills/README.md.")
+        print("No skills found. Add one at  moxie/seed_skills/<name>/SKILL.md  "
+              "— see moxie/seed_skills/README.md.")
         return
     stats = store.skill_stats()
     print(f"{len(reg.skills)} skill(s):\n")
@@ -372,7 +376,7 @@ def cmd_skills(args):
                 ) if st else "unused"
         print(f"  • {s.name}  [{s.action_type or '?'} @ {s.merchant or '?'} "
               f"via {s.channel or 'email'}]  {used}")
-    print("\nContribute know-how: skills/README.md — a folder + a SKILL.md is a PR.")
+    print("\nContribute know-how: moxie/seed_skills/README.md — a folder + a SKILL.md is a PR.")
 
 
 def cmd_doctor(args):
@@ -531,11 +535,11 @@ def main(argv=None):
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("skills", help="list installed community skills (SKILL.md)")
-    p.add_argument("--dir", default="skills", help="skills directory (default: ./skills)")
+    p.add_argument("--dir", default="skills", help="extra skills dir to also search (bundled skills always load)")
     p.set_defaults(func=cmd_skills)
 
     p = sub.add_parser("doctor", help="diagnose your setup")
-    p.add_argument("--dir", default="skills", help="skills directory (default: ./skills)")
+    p.add_argument("--dir", default="skills", help="extra skills dir to also search (bundled skills always load)")
     p.set_defaults(func=cmd_doctor)
 
     args = parser.parse_args(argv)

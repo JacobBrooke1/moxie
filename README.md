@@ -182,7 +182,7 @@ Security is the precondition for everything else here — see [SECURITY.md](SECU
 Moxie deliberately fits the world it came from, so the plumbing is familiar and only the moat is new:
 
 - **Language & install** — Python (Hermes is ~82% Python), installed via a one-line `curl … | bash` that prefers [`uv`](https://github.com/astral-sh/uv), exactly like Hermes.
-- **Skills** — the same `skills/<name>/SKILL.md` convention used by OpenClaw and the [agentskills.io](https://agentskills.io) standard, so skills stay portable and shareable (think ClawHub, but for money-actions).
+- **Skills** — the same `SKILL.md` convention used by OpenClaw and the [agentskills.io](https://agentskills.io) standard (they live in `moxie/seed_skills/` and ship in the package), so skills stay portable and shareable (think ClawHub, but for money-actions).
 - **Familiar CLI** — `moxie doctor` and friends echo `hermes doctor` / `openclaw` so anyone from that world feels at home.
 - **Sandboxing** — action execution is designed to run sandboxed (Docker by default, as OpenClaw does for untrusted sessions).
 
@@ -190,7 +190,7 @@ What's *not* borrowed is the whole point: the **Trust Vault** (consent-first, ta
 
 ## Contributing
 
-The most valuable contribution is **skills** — encoded know-how for cancelling/disputing with a specific merchant, bank, or service; they genuinely drive how Moxie acts. See [skills/README.md](skills/README.md) for the format, [CONTRIBUTING.md](CONTRIBUTING.md) for good first issues, and [`integrations/moxie-bridge/`](integrations/moxie-bridge/SKILL.md) if you want your OpenClaw/Hermes agent to talk to Moxie (look, never touch).
+The most valuable contribution is **skills** — encoded know-how for cancelling/disputing with a specific merchant, bank, or service; they genuinely drive how Moxie acts. See [moxie/seed_skills/README.md](moxie/seed_skills/README.md) for the format, [CONTRIBUTING.md](CONTRIBUTING.md) for good first issues, and [`integrations/moxie-bridge/`](integrations/moxie-bridge/SKILL.md) if you want your OpenClaw/Hermes agent to talk to Moxie (look, never touch).
 
 ---
 

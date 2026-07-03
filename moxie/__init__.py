@@ -5,4 +5,4 @@ badgers companies until your money comes back. The core runs on the standard
 library alone.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

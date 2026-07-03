@@ -4,7 +4,7 @@ Skills follow the same convention as the OpenClaw / Hermes ecosystem (the
 agentskills.io `SKILL.md` standard): one folder per skill, each containing a
 `SKILL.md` with YAML-ish frontmatter + a markdown body of instructions:
 
-    skills/
+    moxie/seed_skills/
       cancel-examplegym/
         SKILL.md
 
@@ -134,16 +134,33 @@ def render_draft(skill, action) -> "str | None":
     ))
 
 
-def default_registry(config) -> SkillRegistry:
-    """Skills from the usual places: MOXIE_SKILLS, ./skills, and the user's
-    workspace (~/.moxie/workspace/skills) — same lookup the CLI uses."""
+def bundled_skills_dir() -> Path:
+    """The seed skill library shipped inside the package (so `pip install
+    moxie-agent` users get Netflix/Spotify/PureGym/NatWest etc. out of the box)."""
+    return Path(__file__).parent / "seed_skills"
+
+
+def skill_search_dirs(config) -> "list[str]":
+    """Where Moxie looks for skills, in precedence order (earlier wins on a
+    merchant clash, so your own skills override the shipped ones):
+      1. MOXIE_SKILLS       explicit override
+      2. ./skills           convenience in a source checkout
+      3. ~/.moxie/workspace/skills   your own installed skills
+      4. the bundled seed library    always available
+    """
     import os
-    reg = SkillRegistry()
     dirs = [
-        os.environ.get("MOXIE_SKILLS") or "skills",
+        os.environ.get("MOXIE_SKILLS"),
+        "skills",
         str(config.home / "workspace" / "skills"),
+        str(bundled_skills_dir()),
     ]
-    for d in dirs:
-        if d and Path(d).exists():
+    return [d for d in dirs if d]
+
+
+def default_registry(config) -> SkillRegistry:
+    reg = SkillRegistry()
+    for d in skill_search_dirs(config):
+        if Path(d).exists():
             reg.load_dir(d)
     return reg

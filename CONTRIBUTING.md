@@ -6,12 +6,13 @@ Thanks for helping build a money agent people can actually trust.
 
 A **skill** is encoded know-how for getting one thing done with one provider — how to cancel a specific gym, dispute a charge with a specific bank, appeal a specific insurer. The library of skills is what makes Moxie genuinely useful (and is something no closed competitor can crowdsource).
 
-A skill is a `SKILL.md` file in its own folder under [`skills/`](skills/), following the
+A skill is a `SKILL.md` file in its own folder under [`moxie/seed_skills/`](moxie/seed_skills/)
+(they ship inside the package, so every `pip install` user gets them), following the
 same convention as OpenClaw and the [agentskills.io](https://agentskills.io) standard —
 YAML-ish frontmatter plus a markdown body:
 
 ```
-skills/
+moxie/seed_skills/
   cancel-examplegym/
     SKILL.md
 ```
@@ -35,7 +36,7 @@ email: member-services@examplegym.com
 ```
 
 Skills *drive* actions: the channel, the verified address or exact cancel URL,
-the steps, the escalation path. See [skills/README.md](skills/README.md) for the
+the steps, the escalation path. See [moxie/seed_skills/README.md](moxie/seed_skills/README.md) for the
 full format (deep-links, `moxie-steps` browser blocks, `moxie-draft` templates,
 and `merchant: "*"` bank-route skills). The loader is dependency-free (no
 PyYAML), so adding a skill never adds a dependency.
@@ -45,7 +46,7 @@ PyYAML), so adding a skill never adds a dependency.
 Each of these is one self-contained PR with an existing pattern to copy:
 
 1. **A merchant skill** — the top of this file. Pick any subscription you've
-   actually cancelled. (Pattern: `skills/cancel-netflix/SKILL.md`.)
+   actually cancelled. (Pattern: `moxie/seed_skills/cancel-netflix/SKILL.md`.)
 2. **A detector** — one function in `moxie/detect.py` + tests in
    `tests/test_detect_more.py`. Ideas: gambling-spend summary, charity-donation
    Gift Aid reminder, duplicate insurance, water/energy bill spikes.
