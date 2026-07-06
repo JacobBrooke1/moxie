@@ -84,6 +84,61 @@ def test_one_streaming_sub_is_fine():
     assert find_duplicate_services(txns) == []
 
 
+def test_broadened_streaming_keywords_still_pair_up():
+    txns = []
+    for m in (3, 4, 5, 6):
+        txns.append(T(f"2026-0{m}-03", "ITVX Premium", 5.99))
+    for m in (5, 6):
+        txns.append(T(f"2026-0{m}-14", "YouTube Premium", 12.99))
+    dupes = find_duplicate_services(txns)
+    assert len(dupes) == 1
+    assert dupes[0].merchant == "YouTube Premium"
+
+
+def test_two_audiobook_subs_flagged_once():
+    txns = []
+    for m in (3, 4, 5, 6):
+        txns.append(T(f"2026-0{m}-03", "Audible", 7.99))
+    for m in (5, 6):
+        txns.append(T(f"2026-0{m}-14", "BookBeat", 9.99))
+    dupes = find_duplicate_services(txns)
+    assert len(dupes) == 1
+    assert dupes[0].merchant == "BookBeat"
+
+
+def test_two_meal_kit_subs_flagged_once():
+    txns = []
+    for m in (3, 4, 5, 6):
+        txns.append(T(f"2026-0{m}-03", "HelloFresh", 34.99))
+    for m in (5, 6):
+        txns.append(T(f"2026-0{m}-14", "Gousto", 29.99))
+    dupes = find_duplicate_services(txns)
+    assert len(dupes) == 1
+    assert dupes[0].merchant == "Gousto"
+
+
+def test_two_vpn_subs_flagged_once():
+    txns = []
+    for m in (3, 4, 5, 6):
+        txns.append(T(f"2026-0{m}-03", "NordVPN", 4.99))
+    for m in (5, 6):
+        txns.append(T(f"2026-0{m}-14", "ExpressVPN", 6.99))
+    dupes = find_duplicate_services(txns)
+    assert len(dupes) == 1
+    assert dupes[0].merchant == "ExpressVPN"
+
+
+def test_two_news_subs_flagged_once():
+    txns = []
+    for m in (3, 4, 5, 6):
+        txns.append(T(f"2026-0{m}-03", "The Times", 6.00))
+    for m in (5, 6):
+        txns.append(T(f"2026-0{m}-14", "The Guardian", 8.00))
+    dupes = find_duplicate_services(txns)
+    assert len(dupes) == 1
+    assert dupes[0].merchant == "The Guardian"
+
+
 # ------------------------------------------------------------ bank fees -----
 def test_overdraft_fees_produce_a_waiver_ask():
     txns = [
