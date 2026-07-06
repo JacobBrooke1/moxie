@@ -3,7 +3,7 @@
 All notable changes to Moxie. Versions follow [semantic versioning](https://semver.org);
 Moxie stays pre-1.0 until an independent security review (see [SECURITY.md](SECURITY.md)).
 
-## Unreleased
+## 0.3.0 — see all your money, and a dashboard that grows on request
 
 - **The money dashboard.** A full Money section: per-account balances (once a
   bank is linked), this-month in/out/left, a where-it-went bar chart, a

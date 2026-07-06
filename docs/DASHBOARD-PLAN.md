@@ -216,6 +216,47 @@ the execute_action guard still holds (widgets can't trigger actions).
 
 ---
 
+## Phase 9 — The document vault: Moxie's own folder for your money papers  *(effort: M · third pass)*
+
+**Goal:** give Moxie one dedicated folder it owns — `~/.moxie/vault/` — where it
+files and serves your money documents: receipts, past bank statements, bills,
+confirmation emails. A "Documents" section on the dashboard to browse, upload,
+and download them.
+
+**Do this (`documents.py` new, `dashboard.py`, `receipts.py`, `cli.py`):**
+- **The folder**: `~/.moxie/vault/{receipts,statements,bills,confirmations}/`,
+  created by `moxie init` / first dashboard run. Moxie only ever reads/writes
+  inside this tree — path traversal hard-blocked (every filename sanitised, no
+  separators/`..`, resolved paths must stay under the vault root; hostile-name
+  tests mandatory).
+- **Auto-filing**: CSV imports get archived to `statements/` (dated copy);
+  receipts captured by OCR/email save their source file to `receipts/`;
+  cancellation/dispute confirmations the user drags in go to `confirmations/`.
+- **Dashboard Documents section**: list per category (name, date, size),
+  upload (browser file → POST, size-capped, extension-whitelisted:
+  pdf/png/jpg/csv/txt/eml), download, delete — all audited (`document_added`
+  etc., names only). Files SERVED with `Content-Disposition: attachment` and
+  a no-sniff header — never rendered inline (an uploaded HTML/SVG must not
+  execute in the dashboard origin; enforce by whitelist + headers, tested).
+- **Encryption**: when `moxie encrypt on` is active, files are stored
+  Fernet-sealed (same cipher) and decrypted on download; plaintext mode
+  documented honestly in SECURITY.md.
+- **Wiring**: dispute evidence can reference a vault file; the receipts flow
+  (Phase 3 of the core plan) stores its images here.
+- **CLI**: `moxie vault list|add <file> [--category]` for parity.
+
+**Acceptance:** drop a statement PDF and a receipt photo into the dashboard →
+they're filed under the right category, listed with dates, downloadable,
+audited; with encryption on the bytes on disk are ciphertext; a file named
+`../../evil` or `x.html` is rejected; nothing in the vault is ever served
+inline or executed.
+
+**Tests:** path-traversal names, extension rejection, size cap, upload/download
+round-trip (incl. encrypted), attachment headers, audit entries, CSV-import
+auto-archive.
+
+---
+
 ## Invariants — never break these (identical to the core build)
 
 1. **Nothing acts without the Trust Vault.** The dashboard chat and money views can advise and navigate, but every real action still passes policy → your approval → audit. The brain never executes.
