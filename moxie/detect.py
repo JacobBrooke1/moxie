@@ -52,7 +52,7 @@ SERVICE_CATEGORIES = {
     "music": ("spotify", "apple music", "tidal", "deezer", "youtube music",
               "amazon music"),
     "cloud storage": ("dropbox", "google one", "icloud", "onedrive", "pcloud",
-                       "mega"),
+                       "mega.nz"),
     "gym": ("gym", "fitness", "fitclub", "peloton", "david lloyd", "nuffield"),
     "audiobooks": ("audible", "bookbeat"),
     "meal kits": ("hellofresh", "gousto"),
