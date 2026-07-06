@@ -68,3 +68,24 @@ disputed with a merchant:
 Never include real account numbers, full card numbers, or anything from
 someone else's account. Success rates aren't guessed — Moxie tracks usage
 locally (`moxie skills` shows used/sent/failed counts on your machine).
+
+## Reviewing a skill PR (maintainer checklist)
+
+Skills steer where users send cancellations and which pages they're guided
+to — which makes them a phishing target. Before merging ANY skill:
+
+1. **Verify the domain, character by character.** `url:` and `email:` must be
+   the merchant's real official domain — beware look-alikes (`audlble.co.uk`,
+   homoglyphs, extra subdomains like `audible.evil.example`). Check the raw
+   bytes if anything looks off, and confirm the domain independently (search
+   for the merchant's help pages yourself — don't trust the PR's own links).
+2. **No credential harvesting.** Steps must never ask the user to type a
+   password, full card number, or bank login anywhere except the merchant's
+   own signed-in site. "Include the last 4 digits" in an email is normal;
+   anything more is a red flag.
+3. **Only lawful, consumer-protective actions** on the user's own account.
+4. **Scope check.** A skill PR touches its own `SKILL.md` folder and nothing
+   else. Code changes hiding in a "skill" PR are an automatic close.
+5. **`pytest -q` stays green** and `moxie skills` lists the new skill.
+
+When in doubt, don't merge — ask the contributor for their source.
