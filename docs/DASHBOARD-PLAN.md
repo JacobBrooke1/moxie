@@ -4,7 +4,9 @@
 
 This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and this enriches it — do not rebuild what's there. Every phase keeps the invariants at the bottom of this file.
 
-> **STATUS (2026-07-03): built.** Every in-scope phase is implemented and tested — ✅ P2 onboarding (auto-open browser, first-run wizard, live key test, in-browser CSV/sample data), ✅ P1 chat (multi-turn, grounded, never executes), ✅ P3 in-dashboard bank linking, ✅ P5 activity feed + heartbeat, ✅ P6 secure remote (login page, session cookies, non-loopback refusal), ✅ P7 polish (mobile, new logo, favicon). ⏸ **P4 (the money dashboard) remains deferred by design.**
+> **STATUS (2026-07-06): first pass built and released as 0.2.0.** ✅ P2 onboarding (auto-open browser, first-run wizard, live key test, in-browser CSV/sample data), ✅ P1 chat (multi-turn, grounded, never executes), ✅ P3 in-dashboard bank linking, ✅ P5 activity feed + heartbeat, ✅ P6 secure remote (login page, session cookies, non-loopback refusal), ✅ P7 polish (mobile, new logo, favicon).
+>
+> **Second build pass (in scope now): ▶ P4 the money dashboard** (per-account balances, stats, charts, upcoming bills) **and ▶ P8 chat-built widgets** ("ask Moxie to add a card" — model emits validated specs, never code).
 >
 > Original scope note: build **every phase except Phase 4 (the money dashboard)**, deferred to a later pass. The **top priority is frictionless onboarding** — the dashboard must become the single front door so that anyone can: find the repo → install → run one command → the dashboard opens → paste their Claude API key there → and set up everything else (Telegram, bank, scanning, chat) from that one screen, whether they're running locally or on a VPS.
 
@@ -80,20 +82,97 @@ This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and 
 
 ---
 
-## Phase 4 — The money dashboard (see all your money)  *(effort: M/L · ⏸ DEFERRED — do NOT build in this pass)*
+## Phase 4 — The money dashboard (see all your money)  *(effort: M/L · ▶ NOW IN SCOPE — second build pass)*
 
-> **Deferred.** Kept here as the spec for a future build. Skip it entirely for now — ship onboarding, chat, bank-linking, activity feed, secure remote, and polish first, then come back to this.
-
-**Goal:** the "banking dashboard" — a real money view, not one card. This is the "later" feature you described, built on data `snapshot.py` already computes.
+**Goal:** the "banking dashboard" — a real money view, not one card. When someone
+links a bank (TrueLayer etc.), they should *see their accounts* and manage their
+money picture from here; CSV-only users get everything except live balances.
 
 **Do this (new dashboard section, `snapshot.py` extensions, `dashboard.py`):**
-- A **Money page/tab** rendering: balance per account, this-month in/out/left, disposable income, committed vs. free, a **category breakdown**, a **month-over-month trend**, an **upcoming committed bills** list, and the **recurring subscriptions** list with an inline "review/cancel" button (routing to the Vault, per Phase 1's boundary).
-- Charts as **hand-rolled inline SVG** (bars for categories, a line for the trend) — NO charting library. The dashboard must stay dependency-free and work offline; keep the stdlib-core ethos. `snapshot.py` already has categories, recurring, trend, committed — extend it with per-account balances and a simple upcoming-bills projection.
-- Honest framing throughout: "figures you decide on", never financial advice (same guardrail as the brain).
+- A **Money section** on the dashboard rendering: **balance per account** (name,
+  current, available — from the balances the bank sync already stores),
+  this-month in/out/left, disposable income, committed vs. free, a **category
+  breakdown**, a **month-over-month spend trend** (extend the snapshot to a
+  per-month series over the data window, not just last-vs-this), an **upcoming
+  committed bills** list (recurring merchants not yet charged this month, with
+  expected day-of-month from their history), and the **recurring subscriptions**
+  list with an inline "review" button (routing to the Findings approval modal —
+  the Vault boundary, always).
+- Charts as **hand-rolled inline SVG** (bars for categories, a line for the
+  trend) — NO charting library. The dashboard must stay dependency-free and
+  work offline; keep the stdlib-core ethos.
+- A `GET /api/money` endpoint returning the full computed picture; the section
+  refreshes with the rest of the page.
+- Honest framing throughout: "figures you decide on", never financial advice
+  (same guardrail as the brain).
 
-**Acceptance:** the Money page shows balances, in/out/left, a category bar chart, a spend trend, and upcoming bills — all from your imported/synced data, all local.
+**Acceptance:** with a linked bank (fake transport in tests), the Money section
+shows each account's balance, in/out/left, a category bar chart, a spend trend
+line, upcoming bills, and recurring subs with review buttons — all local, no
+external requests. CSV-only data shows the same minus balances.
 
-**Tests:** extend `tests/test_snapshot.py` for the new fields; assert the money API returns them; SVG renders without external requests.
+**Tests:** extend `tests/test_snapshot.py` for the new fields (per-month series,
+upcoming-bills projection); `/api/money` shape; SVG output contains no external
+URLs; the review button routes to an existing finding id.
+
+---
+
+## Phase 8 — Chat-built widgets: ask Moxie to grow your dashboard  *(effort: M/L · NEW — second build pass)*
+
+**Goal:** "can you add a card that tracks my eating-out spend?" — and the
+dashboard grows that card. Personal, self-extending, *without ever letting the
+model write code*.
+
+**The security line (non-negotiable, this is the whole design):** the brain
+NEVER emits HTML/JS/CSS and nothing the model outputs is ever rendered as
+markup or executed. Transaction text feeds the brain, so a malicious merchant
+name could try to steer it — if the model could write code into the page that
+holds API keys and approves money actions, that's prompt-injection →
+key-exfiltration. Instead the model emits a **widget SPEC**: a small JSON
+object validated against a strict whitelist, rendered entirely by Moxie's own
+audited code with all strings escaped.
+
+**Do this (`dashboard.py`, `brain.py`, `storage.py`, `snapshot.py`):**
+- **Widget spec vocabulary** (the whole universe of what chat can build):
+  - `stat_card` — a single figure (spend at merchant X / in category Y, this
+    month or trailing N months)
+  - `merchant_tracker` — one merchant's monthly history as an SVG mini-bar
+  - `category_total` — sum over a keyword list, with optional monthly budget
+  - `goal_progress` — a target amount vs. actual (e.g. "keep eating out under
+    £150/mo") as a progress bar
+  - `trend_chart` — spend trend for a filter, as an SVG line
+  Spec fields: `type` (enum above), `title` (≤40 chars, escaped), `merchants`
+  and/or `keywords` (lists of plain strings, escaped, matched against the
+  user's own transactions), `months` (1–12), `target` (number, optional).
+  ANYTHING else — unknown keys, nested objects, HTML in strings — is rejected.
+- **Server-side validation** (`widgets.py` or in `dashboard.py`): a pure
+  function `validate_widget_spec(dict) -> spec | error`, unit-tested against
+  hostile inputs (script tags in titles, absurd lengths, unknown types).
+- **Brain intent**: extend the dashboard chat so "add/track/watch…" requests
+  make the brain propose a spec (a constrained instruction + the vocabulary in
+  the prompt; the reply carries the JSON in a fenced block Moxie parses). The
+  user sees a confirmation chip — "Add this card? [Add] [No]" — the widget is
+  only saved on click (the human confirms, as ever). "Remove the X card" works
+  the same way.
+- **Storage**: widgets persist in the store (encrypted like the rest);
+  `GET /api/widgets`, `POST /api/widgets` (add, from a validated spec),
+  `POST /api/widgets/remove`. Every add/remove is audited (spec summary, never
+  raw model output).
+- **Rendering**: a "Your cards" grid on the dashboard, computed server-side
+  from the same snapshot/transaction data, drawn with Moxie's own SVG/HTML.
+  Layout prefs too: chat can pin/hide built-in cards via the same spec-not-code
+  mechanism (`layout` spec type).
+
+**Acceptance:** asking "track my Netflix spend" in chat yields an "Add this
+card?" confirmation; clicking Add puts a live Netflix tracker on the dashboard
+that survives restart; "remove the Netflix card" removes it; a hostile spec
+(script tag in the title, unknown type, HTML in a keyword) is rejected server-
+side and renders as nothing; the model's raw text is never inserted as markup.
+
+**Tests:** validation against hostile specs; add/remove round-trip via the API;
+fake-brain chat flow producing a spec → confirmation → persisted widget;
+escaping test (a widget titled `<script>alert(1)</script>` renders escaped);
+the execute_action guard still holds (widgets can't trigger actions).
 
 ---
 
