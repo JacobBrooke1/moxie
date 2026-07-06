@@ -24,6 +24,51 @@ def _month(date_str: str) -> str:
     return (date_str or "")[:7]
 
 
+def monthly_series(transactions) -> "list[dict]":
+    """Per-month spend/income over the whole data window, oldest first —
+    the money dashboard's trend line. Spend positive, income from credits."""
+    spend, income = defaultdict(float), defaultdict(float)
+    for t in transactions:
+        m = _month(t.date)
+        if not m:
+            continue
+        if t.amount > 0:
+            spend[m] += t.amount
+        else:
+            income[m] += -t.amount
+    months = sorted(set(spend) | set(income))
+    return [{"month": m, "spend": round(spend.get(m, 0.0), 2),
+             "income": round(income.get(m, 0.0), 2)} for m in months]
+
+
+def upcoming_bills(transactions, today=None) -> "list[dict]":
+    """Recurring merchants that haven't charged yet this month, with the
+    day-of-month they usually hit (median of their history). The 'what's
+    still coming out' list — figures, not fortune-telling."""
+    today = today or dt.date.today()
+    this_month = today.isoformat()[:7]
+    out = []
+    for sub in recurring_monthly(transactions):
+        if any(_month(t.date) == this_month for t in sub["transactions"]):
+            continue  # already charged this month
+        days = []
+        for t in sub["transactions"]:
+            try:
+                days.append(dt.date.fromisoformat(t.date).day)
+            except (ValueError, TypeError):
+                continue
+        if not days:
+            continue
+        out.append({
+            "merchant": sub["merchant"],
+            "monthly": sub["monthly"],
+            "currency": sub["currency"],
+            "expected_day": int(median(days)),
+        })
+    out.sort(key=lambda b: b["expected_day"])
+    return out
+
+
 def compute_snapshot(transactions, balances=None, today=None) -> dict:
     """Derive the month-level picture from transactions (+ balances if a bank
     is linked). Spend positive / credits negative — Moxie's convention."""
@@ -76,17 +121,24 @@ def compute_snapshot(transactions, balances=None, today=None) -> dict:
                       - spend_by_month.get(prev_month, 0.0), 2)
 
     balance = None
+    accounts = []
     currency = transactions[0].currency if transactions else "£"
     if balances:
         try:
             balance = round(sum(float(b.get("current") or 0) for b in balances), 2)
             currency = balances[0].get("currency", currency)
+            accounts = [{"account": b.get("account", "account"),
+                         "currency": b.get("currency", currency),
+                         "available": b.get("available"),
+                         "current": b.get("current")} for b in balances]
         except (TypeError, ValueError):
             balance = None
+            accounts = []
 
     return {
         "currency": currency,
         "balance": balance,                      # None unless a bank is linked
+        "accounts": accounts,                    # per-account balances (bank-linked)
         "monthly_income": monthly_income,        # median of complete months
         "monthly_outgoings": monthly_outgoings,  # median of complete months
         "committed": committed,                  # recurring subs + bills / mo
@@ -99,6 +151,8 @@ def compute_snapshot(transactions, balances=None, today=None) -> dict:
         "top_merchants_this_month": [{"merchant": m, "spent": round(v, 2)}
                                      for m, v in top],
         "spend_trend_vs_last_month": trend,
+        "monthly_series": monthly_series(transactions),
+        "upcoming_bills": upcoming_bills(transactions, today=today),
         "months_of_data": len(months),
         "month": this_month,
     }

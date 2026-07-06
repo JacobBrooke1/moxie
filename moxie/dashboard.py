@@ -336,6 +336,42 @@ class Dash:
                 "committed": s["committed"], "balance": s["balance"],
                 "month": s["month"]}
 
+    def money(self) -> dict:
+        """The full money picture for the Money section: accounts, the month,
+        where it went, the trend, what's still coming out, and the recurring
+        subs — each wired to its live finding when one is waiting. Figures you
+        decide on; never advice."""
+        from .snapshot import snapshot_from_store
+        txns = self.store.load_transactions()
+        if not txns:
+            return {"empty": True,
+                    "note": "import a CSV or link a bank to see your money here"}
+        s = snapshot_from_store(self.store)
+        proposed = {a.merchant.lower(): a.id
+                    for a in self.store.load_actions() if a.status == "proposed"}
+        recurring = [
+            {"merchant": r["merchant"], "monthly": r["monthly"],
+             "finding_id": proposed.get(r["merchant"].lower())}
+            for r in s["recurring"]
+        ]
+        return {
+            "currency": s["currency"],
+            "month": s["month"],
+            "accounts": s["accounts"],
+            "balance": s["balance"],
+            "income": s["monthly_income"],
+            "outgoings": s["monthly_outgoings"],
+            "committed": s["committed"],
+            "spent_this_month": s["spent_this_month"],
+            "left_this_month": s["left_this_month"],
+            "disposable": s["disposable"],
+            "top_merchants": s["top_merchants_this_month"],
+            "monthly_series": s["monthly_series"],
+            "upcoming_bills": s["upcoming_bills"],
+            "recurring": recurring,
+            "months_of_data": s["months_of_data"],
+        }
+
     def _bank_status(self) -> dict:
         from .providers import BankLink
         status = BankLink(self.config).status()
@@ -618,6 +654,24 @@ PAGE = """<!doctype html>
     Anything worth doing routes you to Findings, where you approve it.</div>
 </div>
 
+<h2>Money</h2>
+<div class="muted" id="money_empty" style="display:none">Import a CSV or link a bank —
+your accounts, trends, and upcoming bills will appear here.</div>
+<div id="money_wrap" style="display:none">
+  <div class="grid" id="m_accounts"></div>
+  <div class="grid">
+    <div class="card"><h3>This month</h3><div id="m_stats" style="font-size:13px; line-height:2"></div></div>
+    <div class="card"><h3>Where it went this month</h3><div id="m_bars"></div></div>
+    <div class="card"><h3>Spend by month</h3><div id="m_line"></div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h3>Still to come out this month</h3><table id="m_bills" style="font-size:13px"></table></div>
+    <div class="card"><h3>Recurring subscriptions</h3><table id="m_recurring" style="font-size:13px"></table></div>
+  </div>
+  <div class="muted" style="margin-top:4px">Figures derived from your own data — you decide.
+    Moxie states what's committed and what's left; it isn't a financial adviser.</div>
+</div>
+
 <h2 id="findings_h">Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
 <table id="findings"></table>
 
@@ -769,6 +823,61 @@ async function loadChat(){
       'or sharpen a cancellation draft — you approve everything in Findings.</div>';
   }
 }
+function barChartSVG(items, cur){
+  if(!items.length) return '<div class="muted">nothing yet this month</div>';
+  const max = Math.max(...items.map(i=>i.spent)) || 1;
+  const rows = items.map((it,i) => {
+    const y = i*24, w = Math.max(2, Math.round(150*it.spent/max));
+    return '<text x="0" y="'+(y+13)+'" font-size="11" fill="var(--dim)">'+esc(it.merchant.slice(0,14))+'</text>'+
+      '<rect x="100" y="'+(y+3)+'" width="'+w+'" height="12" rx="3" fill="var(--orange)"></rect>'+
+      '<text x="'+(104+w)+'" y="'+(y+13)+'" font-size="11" fill="var(--fg)">'+cur+it.spent.toFixed(0)+'</text>';
+  }).join('');
+  return '<svg viewBox="0 0 300 '+(items.length*24)+'" width="100%" role="img">'+rows+'</svg>';
+}
+function lineChartSVG(series, cur){
+  if(series.length < 2) return '<div class="muted">needs two months of data</div>';
+  const w=300, h=90, pad=14;
+  const max = Math.max(...series.map(p=>p.spend)) || 1;
+  const x = i => pad + i*(w-2*pad)/(series.length-1);
+  const y = v => (h-pad) - (v/max)*(h-2*pad);
+  const pts = series.map((p,i)=>x(i).toFixed(1)+','+y(p.spend).toFixed(1)).join(' ');
+  const dots = series.map((p,i)=>'<circle cx="'+x(i).toFixed(1)+'" cy="'+y(p.spend).toFixed(1)+
+    '" r="2.5" fill="var(--orange)"></circle>').join('');
+  const first = series[0], last = series[series.length-1];
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" role="img">'+
+    '<polyline points="'+pts+'" fill="none" stroke="var(--orange)" stroke-width="2"></polyline>'+dots+
+    '<text x="'+pad+'" y="'+(h-2)+'" font-size="10" fill="var(--dim)">'+esc(first.month)+'</text>'+
+    '<text x="'+(w-pad)+'" y="'+(h-2)+'" font-size="10" fill="var(--dim)" text-anchor="end">'+esc(last.month)+
+    ' '+cur+last.spend.toFixed(0)+'</text></svg>';
+}
+async function renderMoney(){
+  const m = await api('/api/money');
+  if(m.empty){ $('money_empty').style.display='block'; $('money_wrap').style.display='none'; return; }
+  $('money_empty').style.display='none'; $('money_wrap').style.display='block';
+  const c = m.currency;
+  $('m_accounts').innerHTML = (m.accounts||[]).map(a =>
+    '<div class="card"><h3>'+esc(a.account)+'</h3><div class="big ok">'+c+(+a.current).toFixed(2)+'</div>'+
+    '<div class="muted">'+(a.available!=null ? c+(+a.available).toFixed(2)+' available' : 'read-only')+'</div></div>'
+  ).join('') || '<div class="card"><h3>Balance</h3><div class="big">—</div>'+
+    '<div class="muted">link a bank to see live balances; everything below works from imports</div></div>';
+  $('m_stats').innerHTML =
+    'in ~<b>'+c+m.income.toFixed(0)+'</b> · spent <b>'+c+m.spent_this_month.toFixed(0)+'</b>'+
+    ' · committed <b>'+c+m.committed.toFixed(0)+'</b><br>'+
+    'left this month: <b class="'+(m.left_this_month>0?'ok':'bad')+'">'+c+m.left_this_month.toFixed(2)+'</b>'+
+    '<br><span class="muted">typical free cash '+c+m.disposable.toFixed(0)+'/mo · '+
+    m.months_of_data+' month(s) of data</span>';
+  $('m_bars').innerHTML = barChartSVG(m.top_merchants||[], c);
+  $('m_line').innerHTML = lineChartSVG(m.monthly_series||[], c);
+  $('m_bills').innerHTML = (m.upcoming_bills||[]).map(b =>
+    '<tr><td class="muted" style="width:70px">~day '+b.expected_day+'</td><td>'+esc(b.merchant)+
+    '</td><td style="text-align:right">'+c+b.monthly.toFixed(2)+'</td></tr>').join('')
+    || '<tr><td class="muted">nothing left to come out — nice.</td></tr>';
+  $('m_recurring').innerHTML = (m.recurring||[]).map(r =>
+    '<tr><td>'+esc(r.merchant)+'</td><td>'+c+r.monthly.toFixed(2)+'/mo</td><td style="text-align:right">'+
+    (r.finding_id ? '<button onclick="approve(\\''+r.finding_id+'\\')">review</button>'
+                  : '<span class="muted">no open finding</span>')+'</td></tr>').join('')
+    || '<tr><td class="muted">no recurring charges detected yet</td></tr>';
+}
 async function sendChat(){
   const box = $('chatbox'); const msg = box.value.trim();
   if(!msg) return;
@@ -882,7 +991,7 @@ async function detect(){ const r = await api('/api/telegram/detect', {});
   window._chat = r.chat_id;
   $('detected').textContent = ' found: '+r.name+' ('+r.chat_id+')';
   $('pairbtn').style.display = 'inline-block'; }
-refresh(); loadChat(); setInterval(refresh, 15000);
+refresh(); loadChat(); renderMoney(); setInterval(()=>{refresh(); renderMoney();}, 15000);
 </script></body></html>"""
 
 
@@ -1008,6 +1117,8 @@ def make_handler(dash: Dash):
                     self._json(dash.chat_history())
                 elif self.path == "/api/activity":
                     self._json(dash.activity())
+                elif self.path == "/api/money":
+                    self._json(dash.money())
                 else:
                     self._json({"error": "not found"}, 404)
             elif self.path == "/favicon.svg" or self.path == "/favicon.ico":
