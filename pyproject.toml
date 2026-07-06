@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moxie-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Moxie — the open-source money agent that acts on your money, only with your approval. Local-first, consent-first."
 readme = "README.md"
 requires-python = ">=3.9"
