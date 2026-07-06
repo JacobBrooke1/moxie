@@ -6,7 +6,7 @@ This plan is **additive**. Moxie Dash already exists (`moxie/dashboard.py`) and 
 
 > **STATUS (2026-07-06): first pass built and released as 0.2.0.** ✅ P2 onboarding (auto-open browser, first-run wizard, live key test, in-browser CSV/sample data), ✅ P1 chat (multi-turn, grounded, never executes), ✅ P3 in-dashboard bank linking, ✅ P5 activity feed + heartbeat, ✅ P6 secure remote (login page, session cookies, non-loopback refusal), ✅ P7 polish (mobile, new logo, favicon).
 >
-> **Second build pass (in scope now): ▶ P4 the money dashboard** (per-account balances, stats, charts, upcoming bills) **and ▶ P8 chat-built widgets** ("ask Moxie to add a card" — model emits validated specs, never code).
+> **Second build pass (2026-07-06): ✅ built.** ✅ P4 the money dashboard (per-account balances, stats, hand-rolled SVG charts, upcoming bills, recurring subs wired to the Vault) and ✅ P8 chat-built widgets ("ask Moxie to add a card" — the model emits strictly-validated specs, never code; human-confirmed, encrypted at rest, escaped at render, audited).
 >
 > Original scope note: build **every phase except Phase 4 (the money dashboard)**, deferred to a later pass. The **top priority is frictionless onboarding** — the dashboard must become the single front door so that anyone can: find the repo → install → run one command → the dashboard opens → paste their Claude API key there → and set up everything else (Telegram, bank, scanning, chat) from that one screen, whether they're running locally or on a VPS.
 

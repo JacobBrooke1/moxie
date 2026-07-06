@@ -163,6 +163,38 @@ class Store:
         except Exception:
             pass
 
+    # --- chat-built widgets (validated specs only; sealed like the rest) ---
+    def _widgets_table(self) -> None:
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS widgets (id TEXT PRIMARY KEY, data TEXT)")
+
+    def save_widget(self, widget_id: str, spec: dict) -> None:
+        self._widgets_table()
+        self.db.execute("REPLACE INTO widgets (id, data) VALUES (?, ?)",
+                        (widget_id, self._seal(json.dumps(spec))))
+        self.db.commit()
+
+    def load_widgets(self) -> "list[dict]":
+        self._widgets_table()
+        rows = self.db.execute(
+            "SELECT id, data FROM widgets WHERE id != 'layout'").fetchall()
+        return [{"id": r[0], "spec": json.loads(self._open(r[1]))} for r in rows]
+
+    def delete_widget(self, widget_id: str) -> bool:
+        self._widgets_table()
+        cur = self.db.execute("DELETE FROM widgets WHERE id = ?", (widget_id,))
+        self.db.commit()
+        return cur.rowcount > 0
+
+    def get_layout(self) -> "dict | None":
+        self._widgets_table()
+        row = self.db.execute(
+            "SELECT data FROM widgets WHERE id = 'layout'").fetchone()
+        return json.loads(self._open(row[0])) if row else None
+
+    def set_layout(self, spec: dict) -> None:
+        self.save_widget("layout", spec)
+
     # --- skill stats (how often each SKILL.md was used, and how it went) ---
     def bump_skill(self, name: str, outcome: str) -> None:
         """outcome: 'used' on every execution; plus 'sent' or 'failed'."""

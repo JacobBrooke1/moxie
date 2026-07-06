@@ -3,6 +3,24 @@
 All notable changes to Moxie. Versions follow [semantic versioning](https://semver.org);
 Moxie stays pre-1.0 until an independent security review (see [SECURITY.md](SECURITY.md)).
 
+## Unreleased
+
+- **The money dashboard.** A full Money section: per-account balances (once a
+  bank is linked), this-month in/out/left, a where-it-went bar chart, a
+  spend-by-month trend line (hand-rolled SVG — still zero dependencies, still
+  offline), upcoming committed bills with their expected day, and your
+  recurring subscriptions each wired to its live finding for one-click review
+  through the Trust Vault. Figures you decide on — never financial advice.
+- **Chat-built widgets.** Ask Moxie in chat — "track my Netflix spend",
+  "keep my eating out under £150 a month" — and it proposes a dashboard card
+  you confirm with one click. Cards persist (encrypted like everything else),
+  can be removed by chat or the ✕, and chat can pin/hide the built-in status
+  cards too. Security by construction: the model only ever emits a small JSON
+  spec validated against a strict whitelist — never HTML, never code — and
+  everything renders through Moxie's own escaped templates, so a poisoned
+  merchant name can't turn the brain into a code-injection vector. Every
+  add/remove is audited.
+
 ## 0.2.0 — the dashboard release
 
 Moxie Dash becomes the single front door — most people never need the terminal.

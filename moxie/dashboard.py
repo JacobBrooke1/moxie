@@ -227,6 +227,12 @@ class Dash:
                     else "Kill switch released")
         if event == "dashboard_chat":
             return "Chat with Moxie"
+        if event == "widget_added":
+            return f"You added a card: {d.get('title', '?')}"
+        if event == "widget_removed":
+            return "You removed a card"
+        if event == "layout_changed":
+            return "You rearranged the dashboard"
         if event == "brain_tested":
             return "API key tested — brain is up"
         if event == "wizard_done":
@@ -259,10 +265,28 @@ class Dash:
             return None
 
     # ---- chat (advises and navigates; NEVER executes) ------------------------
+    WIDGET_INSTRUCTION = (
+        "\n\nDASHBOARD CARDS: if — and only if — the user asks to add/track/"
+        "watch something as a dashboard card, include ONE fenced block "
+        "```moxie-widget\n{...}\n``` containing ONLY a JSON object with keys "
+        "from: type (stat_card|merchant_tracker|category_total|goal_progress|"
+        "trend_chart), title (<=40 plain chars), merchants and/or keywords "
+        "(lists of plain strings), months (1-12), target (number, required "
+        "for goal_progress). To remove a card: {\"type\": \"remove_widget\", "
+        "\"title\": \"...\"}. To pin/hide the built-in status cards: "
+        "{\"type\": \"layout\", \"hide\": [...], \"pin\": [...]} using ids "
+        "heartbeat|brain|telegram|data|audit|mode|bank|month. Never include "
+        "HTML, scripts, or any other keys — the block is data, not code, and "
+        "anything outside this schema is rejected. The user confirms before "
+        "anything is saved."
+    )
+
     def chat(self, message: str) -> dict:
         """Talk to Moxie about your money, grounded in your real data. The
         brain has no execute path — when the user wants to act, we point at
-        the matching finding and the Vault's approval modal takes over."""
+        the matching finding and the Vault's approval modal takes over. When
+        they ask for a dashboard card, the model proposes a SPEC (never code)
+        which the human confirms before it is saved."""
         message = (message or "").strip()
         if not message:
             return {"error": "say something"}
@@ -275,10 +299,13 @@ class Dash:
         actions = self.store.load_actions()
         history = self.store.load_chat(limit=12)
         try:
-            reply = brain.converse(message, history, txns, actions,
+            reply = brain.converse(message + self.WIDGET_INSTRUCTION, history,
+                                   txns, actions,
                                    snapshot=snapshot_from_store(self.store))
         except Exception as e:
             return {"error": f"the brain call failed: {e}"}
+
+        reply, proposal, rejected = self._extract_widget_proposal(reply)
         self.store.save_chat("user", message)
         self.store.save_chat("assistant", reply)
         self.audit.append("dashboard_chat", {"chars": len(message)})
@@ -291,7 +318,84 @@ class Dash:
             for a in actions
             if a.status == "proposed" and a.merchant.lower() in blob
         ][:4]
-        return {"reply": reply, "related": related}
+        out = {"reply": reply, "related": related}
+        if proposal:
+            out["proposal"] = proposal
+        if rejected:
+            out["proposal_rejected"] = rejected
+        return out
+
+    def _extract_widget_proposal(self, reply: str):
+        """Pull a ```moxie-widget``` block out of the model's reply and turn
+        it into a validated proposal. The model's text is NEVER treated as
+        markup; the block is parsed as JSON and validated or rejected."""
+        import re
+        from .widgets import validate_widget_spec
+        match = re.search(r"```moxie-widget\s*\n(.*?)```", reply or "", re.S)
+        if not match:
+            return reply, None, None
+        cleaned = (reply[:match.start()] + reply[match.end():]).strip()
+        try:
+            raw = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return cleaned, None, "the proposed card wasn't valid JSON — rejected"
+        spec, err = validate_widget_spec(raw)
+        if err:
+            return cleaned, None, f"the proposed card was rejected: {err}"
+        if spec["type"] == "remove_widget":
+            target = next((w for w in self.store.load_widgets()
+                           if w["spec"].get("title", "").lower()
+                           == spec["title"].lower()), None)
+            if not target:
+                return cleaned, None, f"no card called '{spec['title']}' to remove"
+            return cleaned, {"kind": "remove", "id": target["id"],
+                             "title": spec["title"]}, None
+        if spec["type"] == "layout":
+            return cleaned, {"kind": "layout", "spec": spec}, None
+        return cleaned, {"kind": "add", "spec": spec}, None
+
+    # ---- widgets (specs in, Moxie's own rendering out) -----------------------
+    def widgets_list(self) -> dict:
+        from .widgets import compute_widget
+        txns = self.store.load_transactions()
+        out = []
+        for w in self.store.load_widgets():
+            out.append({"id": w["id"], "spec": w["spec"],
+                        "data": compute_widget(w["spec"], txns)})
+        return {"widgets": out,
+                "layout": self.store.get_layout() or {"hide": [], "pin": []}}
+
+    def widget_add(self, raw_spec) -> dict:
+        """Persist a card — ALWAYS re-validated server-side; the confirm chip
+        in the UI is consent, not the security boundary."""
+        from .widgets import new_widget_id, validate_widget_spec
+        spec, err = validate_widget_spec(raw_spec)
+        if err or spec["type"] not in ("stat_card", "merchant_tracker",
+                                       "category_total", "goal_progress",
+                                       "trend_chart"):
+            return {"error": err or "not an addable widget type"}
+        widget_id = new_widget_id()
+        self.store.save_widget(widget_id, spec)
+        self.audit.append("widget_added",
+                          {"widget": widget_id, "type": spec["type"],
+                           "title": spec["title"]})
+        return {"ok": True, "id": widget_id}
+
+    def widget_remove(self, widget_id: str) -> dict:
+        if not self.store.delete_widget((widget_id or "").strip()):
+            return {"error": "no such card"}
+        self.audit.append("widget_removed", {"widget": widget_id})
+        return {"ok": True}
+
+    def layout_set(self, raw_spec) -> dict:
+        from .widgets import validate_widget_spec
+        spec, err = validate_widget_spec(raw_spec)
+        if err or spec["type"] != "layout":
+            return {"error": err or "not a layout spec"}
+        self.store.set_layout(spec)
+        self.audit.append("layout_changed",
+                          {"hide": spec["hide"], "pin": spec["pin"]})
+        return {"ok": True}
 
     def chat_history(self) -> list:
         return self.store.load_chat(limit=40)
@@ -604,19 +708,19 @@ PAGE = """<!doctype html>
 
 <div id="main">
 <div class="grid">
-  <div class="card"><h3>Heartbeat</h3><div class="big ok" id="hb">●</div>
+  <div class="card" id="card_heartbeat"><h3>Heartbeat</h3><div class="big ok" id="hb">●</div>
       <div class="muted" id="hb2"></div></div>
-  <div class="card"><h3>Brain</h3><div class="big" id="brain"></div>
+  <div class="card" id="card_brain"><h3>Brain</h3><div class="big" id="brain"></div>
       <div class="muted" id="brain2"></div></div>
-  <div class="card"><h3>Telegram</h3><div class="big" id="tg"></div>
+  <div class="card" id="card_telegram"><h3>Telegram</h3><div class="big" id="tg"></div>
       <div class="muted" id="tg2"></div></div>
-  <div class="card"><h3>Data</h3><div class="big" id="data"></div>
+  <div class="card" id="card_data"><h3>Data</h3><div class="big" id="data"></div>
       <div class="muted" id="data2"></div></div>
-  <div class="card"><h3>Audit trail</h3><div class="big" id="audit"></div>
+  <div class="card" id="card_audit"><h3>Audit trail</h3><div class="big" id="audit"></div>
       <div class="muted" id="audit2"></div></div>
-  <div class="card"><h3>Mode</h3><div class="big" id="mode"></div>
+  <div class="card" id="card_mode"><h3>Mode</h3><div class="big" id="mode"></div>
       <div class="muted" id="mode2"></div></div>
-  <div class="card"><h3>Bank</h3><div class="big" id="bank"></div>
+  <div class="card" id="card_bank"><h3>Bank</h3><div class="big" id="bank"></div>
       <div class="muted" id="bank2"></div>
       <div style="margin-top:8px">
         <button onclick="syncBank()">sync now</button>
@@ -638,9 +742,12 @@ PAGE = """<!doctype html>
           <div style="margin-top:8px"><button class="primary" onclick="bankComplete()">Complete link</button></div>
         </div>
       </div></div>
-  <div class="card"><h3>This month</h3><div class="big" id="money"></div>
+  <div class="card" id="card_month"><h3>This month</h3><div class="big" id="money"></div>
       <div class="muted" id="money2"></div></div>
 </div>
+
+<div id="cards_h" style="display:none"><h2>Your cards</h2></div>
+<div class="grid" id="custom_cards"></div>
 
 <h2>Chat with Moxie</h2>
 <div class="card" style="padding:0">
@@ -878,6 +985,78 @@ async function renderMoney(){
                   : '<span class="muted">no open finding</span>')+'</td></tr>').join('')
     || '<tr><td class="muted">no recurring charges detected yet</td></tr>';
 }
+function miniSeriesSVG(series, cur){
+  const max = Math.max(...series.map(p=>p.amount)) || 1;
+  const bw = Math.floor(220/series.length) - 4;
+  const bars = series.map((p,i) => {
+    const h = Math.max(2, Math.round(48*p.amount/max));
+    return '<rect x="'+(i*(bw+4))+'" y="'+(52-h)+'" width="'+bw+'" height="'+h+
+      '" rx="2" fill="var(--orange)"></rect>';
+  }).join('');
+  const last = series[series.length-1];
+  return '<svg viewBox="0 0 230 66" width="100%" role="img">'+bars+
+    '<text x="0" y="64" font-size="10" fill="var(--dim)">'+esc(series[0].month)+'</text>'+
+    '<text x="220" y="64" font-size="10" fill="var(--dim)" text-anchor="end">'+
+    esc(last.month)+' '+cur+last.amount.toFixed(0)+'</text></svg>';
+}
+function widgetCard(w){
+  const d = w.data, c = d.currency, t = w.spec.type;
+  let body = '';
+  if(t==='stat_card' || t==='category_total'){
+    body = '<div class="big">'+c+(d.value||0).toFixed(2)+'</div>'+
+      '<div class="muted">last '+d.months+' month(s)'+
+      (d.target ? ' · target '+c+d.target.toFixed(0)+'/mo' : '')+'</div>';
+  } else if(t==='goal_progress'){
+    const pct = d.pct||0, over = d.actual > d.target;
+    body = '<div class="big '+(over?'bad':'ok')+'">'+c+d.actual.toFixed(2)+
+      ' <span class="muted" style="font-size:13px">of '+c+d.target.toFixed(0)+'</span></div>'+
+      '<div style="background:var(--bg); border:1px solid var(--line); border-radius:6px; height:10px; margin-top:6px">'+
+      '<div style="width:'+Math.min(100,pct)+'%; height:100%; border-radius:5px; background:'+
+      (over?'var(--red)':'var(--green)')+'"></div></div>'+
+      '<div class="muted" style="margin-top:4px">'+pct.toFixed(0)+'% of target this month</div>';
+  } else {
+    body = miniSeriesSVG(d.series||[], c);
+  }
+  return '<div class="card" style="position:relative">'+
+    '<button onclick="removeWidget(\\''+w.id+'\\')" title="remove card" '+
+    'style="position:absolute; top:8px; right:8px; padding:1px 8px">✕</button>'+
+    '<h3>'+esc(w.spec.title)+'</h3>'+body+'</div>';
+}
+async function renderWidgets(){
+  const out = await api('/api/widgets');
+  const ws = out.widgets || [];
+  $('cards_h').style.display = ws.length ? 'block' : 'none';
+  $('custom_cards').innerHTML = ws.map(widgetCard).join('');
+  const lay = out.layout || {hide:[], pin:[]};
+  ['heartbeat','brain','telegram','data','audit','mode','bank','month'].forEach(id => {
+    const el = $('card_'+id); if(!el) return;
+    el.style.display = lay.hide.includes(id) ? 'none' : '';
+    el.style.order = lay.pin.includes(id) ? '-1' : '';
+  });
+}
+async function removeWidget(id){
+  const r = await api('/api/widgets/remove', {id});
+  toast(r.error || 'Card removed'); renderWidgets();
+}
+function proposalChip(p){
+  window._proposal = p;
+  const label = p.kind==='add' ? 'Add this card: "'+esc(p.spec.title)+'"?'
+    : p.kind==='remove' ? 'Remove the card "'+esc(p.title)+'"?'
+    : 'Change the dashboard layout?';
+  return '<div style="margin-top:8px; padding:8px; border:1px dashed var(--orange); border-radius:8px">'+
+    label+' <button class="primary" onclick="acceptProposal()" style="margin-left:6px">Yes</button> '+
+    '<button onclick="window._proposal=null; this.parentElement.remove()">No</button></div>';
+}
+async function acceptProposal(){
+  const p = window._proposal; if(!p) return;
+  window._proposal = null;
+  let r;
+  if(p.kind==='add') r = await api('/api/widgets', {spec: p.spec});
+  else if(p.kind==='remove') r = await api('/api/widgets/remove', {id: p.id});
+  else r = await api('/api/layout', {spec: p.spec});
+  toast(r.error || 'Done — your dashboard grew.');
+  renderWidgets();
+}
 async function sendChat(){
   const box = $('chatbox'); const msg = box.value.trim();
   if(!msg) return;
@@ -887,7 +1066,10 @@ async function sendChat(){
   $('chatlog').scrollTop = $('chatlog').scrollHeight;
   const r = await api('/api/chat', {message: msg});
   const think = $('thinking'); if(think) think.remove();
-  $('chatlog').innerHTML += chatBubble('assistant', r.error ? ('⚠️ '+r.error) : r.reply, r.related);
+  let text = r.error ? ('⚠️ '+r.error) : r.reply;
+  if(r.proposal_rejected) text += '\\n\\n⚠️ ' + r.proposal_rejected;
+  $('chatlog').innerHTML += chatBubble('assistant', text, r.related);
+  if(r.proposal) $('chatlog').innerHTML += proposalChip(r.proposal);
   $('chatlog').scrollTop = $('chatlog').scrollHeight;
 }
 
@@ -991,7 +1173,8 @@ async function detect(){ const r = await api('/api/telegram/detect', {});
   window._chat = r.chat_id;
   $('detected').textContent = ' found: '+r.name+' ('+r.chat_id+')';
   $('pairbtn').style.display = 'inline-block'; }
-refresh(); loadChat(); renderMoney(); setInterval(()=>{refresh(); renderMoney();}, 15000);
+refresh(); loadChat(); renderMoney(); renderWidgets();
+setInterval(()=>{refresh(); renderMoney(); renderWidgets();}, 15000);
 </script></body></html>"""
 
 
@@ -1119,6 +1302,8 @@ def make_handler(dash: Dash):
                     self._json(dash.activity())
                 elif self.path == "/api/money":
                     self._json(dash.money())
+                elif self.path == "/api/widgets":
+                    self._json(dash.widgets_list())
                 else:
                     self._json({"error": "not found"}, 404)
             elif self.path == "/favicon.svg" or self.path == "/favicon.ico":
@@ -1204,6 +1389,12 @@ def make_handler(dash: Dash):
                 self._json(dash.brain_test())
             elif self.path == "/api/chat":
                 self._json(dash.chat(form.get("message", "")))
+            elif self.path == "/api/widgets":
+                self._json(dash.widget_add(form.get("spec")))
+            elif self.path == "/api/widgets/remove":
+                self._json(dash.widget_remove(form.get("id", "")))
+            elif self.path == "/api/layout":
+                self._json(dash.layout_set(form.get("spec")))
             elif self.path == "/api/import/csv":
                 self._json(dash.import_csv_text(form.get("name", ""),
                                                 form.get("text", "")))
