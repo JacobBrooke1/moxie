@@ -1179,14 +1179,14 @@ setInterval(()=>{refresh(); renderMoney(); renderWidgets();}, 15000);
 
 
 FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<g fill="#E8862E"><ellipse cx="34" cy="34" rx="21" ry="12"/>
-<circle cx="15" cy="32" r="9"/><path d="M10 29 L4 33 L11 37 Z"/>
-<rect x="20" y="38" width="7" height="14" rx="3"/>
-<rect x="42" y="38" width="7" height="14" rx="3"/>
-<ellipse cx="56" cy="25" rx="10" ry="5" transform="rotate(-24 56 25)"/></g>
-<path fill="#F4EDE2" d="M14 26 C22 21 32 20 40 22 C48 23 54 25 60 22
-C58 28 52 31 46 31 C38 32 26 31 18 30 C15 29 14 28 14 26 Z"/>
-<circle cx="12" cy="30" r="1.6" fill="#F4EDE2"/></svg>"""
+<circle cx="32" cy="32" r="30" fill="#0d0d0d"/>
+<circle cx="32" cy="32" r="26" fill="#E8862E" stroke="#F4EDE2" stroke-width="3"/>
+<path fill="#1a1a1a" d="M18 44 C17 32 22 20 33 17 C41 15 47 20 50 26
+C51 29 49 30 46 30 C44 30 42 31 41 33 C38 40 40 44 40 48
+C40 52 36 54 30 53 C23 52 19 50 18 44 Z"/>
+<path fill="#F4EDE2" d="M20 40 C19 30 24 21 33 18 C37 17 41 18 43 21
+C39 20 34 22 30 26 C26 30 23 35 23 41 C23 43 21 43 20 40 Z"/>
+<circle cx="41" cy="25" r="2.2" fill="#F4EDE2"/></svg>"""
 
 LOGIN_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Moxie — sign in</title>

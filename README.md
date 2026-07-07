@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.svg" alt="Moxie the honey badger" width="360">
+<img src="https://raw.githubusercontent.com/JacobBrooke1/moxie/main/docs/logo.png" alt="Moxie — the honey badger money agent" width="420">
 
 # 🦡 Moxie
 
