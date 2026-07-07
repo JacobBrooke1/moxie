@@ -116,3 +116,23 @@ def maybe_decrypt(text: str, cipher: "Cipher | None") -> str:
                 "— set it in the environment or the OS keychain")
         return cipher.decrypt(text)
     return text
+
+
+# Binary variants — the document vault stores files, not strings.
+ENC_BYTES_PREFIX = b"encb:"
+
+
+def seal_bytes(data: bytes, cipher: "Cipher | None") -> bytes:
+    if cipher is None:
+        return data
+    return ENC_BYTES_PREFIX + cipher._fernet.encrypt(data)
+
+
+def open_bytes(data: bytes, cipher: "Cipher | None") -> bytes:
+    if not data.startswith(ENC_BYTES_PREFIX):
+        return data  # legacy/plaintext file
+    if cipher is None:
+        raise RuntimeError(
+            "this file is encrypted but no MOXIE_ENCRYPTION_KEY is available "
+            "— set it in the environment or the OS keychain")
+    return cipher._fernet.decrypt(data[len(ENC_BYTES_PREFIX):])

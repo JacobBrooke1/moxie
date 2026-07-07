@@ -216,7 +216,7 @@ the execute_action guard still holds (widgets can't trigger actions).
 
 ---
 
-## Phase 9 — The document vault: Moxie's own folder for your money papers  *(effort: M · third pass)*
+## Phase 9 — The document vault: Moxie's own folder for your money papers  *(✅ built 2026-07-06)*
 
 **Goal:** give Moxie one dedicated folder it owns — `~/.moxie/vault/` — where it
 files and serves your money documents: receipts, past bank statements, bills,

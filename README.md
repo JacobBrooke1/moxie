@@ -46,6 +46,7 @@ Look at who already touches your money:
 - ✅ **Acts — with your consent** — drafts the cancellation/dispute, shows it to you (editable), and sends it **only** when you approve *and* `MOXIE_LIVE=true`. Default is drafts-only. Receipt attached as proof.
 - 📮 **Three action tiers** — email from *your own* mailbox (SMTP), guided deep-links (Moxie shows the exact cancel page + clicks; you click), and per-merchant browser automation (optional, double-gated, sandboxed).
 - 📊 **A money dashboard that grows on request** — accounts, trends, and upcoming bills out of the box, and you can *ask* Moxie in chat to add cards ("track my Netflix spend", "keep eating out under £150/mo"). The model only ever proposes validated specs — never code — and you confirm every card.
+- 📁 **A document vault** — `~/.moxie/vault/` files your receipts, statements, bills, and confirmations; browse and upload from the dashboard, imported CSVs archive themselves, everything encrypted at rest with `moxie encrypt on`.
 - 🛡️ **Trust Vault** — deny-by-default policy engine, preview/simulate, approval gates, and a **hash-chained, tamper-evident audit log**.
 - 🧩 **Community skill library** — reusable "how to cancel with X / dispute with Y" skills, each carrying its own success rate.
 - 🔒 **Local-first & BYO key** — runs on your machine with your own LLM API key, or fully offline with a local model.

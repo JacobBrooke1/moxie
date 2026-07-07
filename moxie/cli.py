@@ -42,10 +42,12 @@ def _skill_dirs(args, config):
 
 
 def cmd_init(args):
+    from .documents import DocumentVault
     config = Config()
     config.save()
     config, store, audit = _ctx(config)
     (config.home / "workspace" / "skills").mkdir(parents=True, exist_ok=True)
+    DocumentVault(config).ensure()
     for receipt in sample_receipts():
         store.save_receipt(receipt)
     instructions = ensure_instructions(config)
@@ -62,6 +64,15 @@ def cmd_scan(args):
         txns, source = import_pdf(args.pdf), args.pdf
     elif args.csv:
         txns, source = import_csv(args.csv), args.csv
+        # a dated copy lands in the vault, so past statements stay findable
+        from .documents import DocumentVault
+        from pathlib import Path as _P
+        archived = DocumentVault(config).archive_csv(
+            _P(args.csv).name, _P(args.csv).read_text(encoding="utf-8-sig"))
+        if archived and archived.get("ok"):
+            audit.append("document_added", {"category": "statements",
+                                            "name": archived["name"],
+                                            "via": "csv_import"})
     else:
         txns, source = sample_transactions(), "built-in sample data"
 
@@ -182,6 +193,37 @@ def cmd_secret(args):
               + ("" if via_keyring else "  (keyring not installed — env/.env only)"))
 
 
+def cmd_vault(args):
+    from .documents import CATEGORIES, DocumentVault
+    from pathlib import Path as _P
+    config, store, audit = _ctx()
+    vault = DocumentVault(config)
+
+    if args.action == "list":
+        files = vault.list()
+        if not files:
+            print(f"Vault is empty ({vault.root}). Add with: moxie vault add file.pdf")
+            return
+        for f in files:
+            print(f"  {f['category']:14} {f['name']:40} {f['size']/1024:7.0f} KB  {f['modified']}")
+        return
+
+    # add
+    src = _P(args.file or "")
+    if not src.exists():
+        raise SystemExit(f"❌ no such file: {src}")
+    category = args.category
+    if category not in CATEGORIES:
+        raise SystemExit(f"❌ category must be one of: {', '.join(CATEGORIES)}")
+    out = vault.add(category, src.name, src.read_bytes())
+    if out.get("error"):
+        raise SystemExit(f"❌ {out['error']}")
+    audit.append("document_added", {"category": category, "name": out["name"],
+                                    "via": "cli"})
+    sealed = " (encrypted at rest)" if out.get("sealed") else ""
+    print(f"📁 Filed {out['name']} → vault/{category}{sealed}")
+
+
 def cmd_kill(args):
     config, store, audit = _ctx()
     if args.release:
@@ -250,6 +292,9 @@ def cmd_receipt(args):
         except RuntimeError as e:
             raise SystemExit(f"❌ {e}")
 
+    from .documents import DocumentVault
+    from pathlib import Path as _P
+    vault = DocumentVault(config)
     for r in new:
         store.save_receipt(r)
         match = match_receipt(r, txns)
@@ -257,6 +302,13 @@ def cmd_receipt(args):
         audit.append("receipt_filed", {"merchant": r.merchant, "amount": r.amount,
                                        "source": r.source,
                                        "matched": bool(match)})
+        # the source file itself lands in the vault as evidence
+        if r.path and _P(r.path).exists():
+            filed = vault.add("receipts", _P(r.path).name, _P(r.path).read_bytes())
+            if filed.get("ok"):
+                audit.append("document_added", {"category": "receipts",
+                                                "name": filed["name"],
+                                                "via": "receipt"})
         print(f"🧾 Filed: {r.merchant} {r.amount:.2f} ({r.date}, {r.source}){matched}")
     if not new:
         print("Nothing new found.")
@@ -512,6 +564,13 @@ def main(argv=None):
 
     p = sub.add_parser("budget", help="this month's money picture: in / out / left")
     p.set_defaults(func=cmd_budget)
+
+    p = sub.add_parser("vault", help="the document vault: receipts, statements, bills")
+    p.add_argument("action", choices=["list", "add"])
+    p.add_argument("file", nargs="?", help="file to add (for `add`)")
+    p.add_argument("--category", default="bills",
+                   help="receipts | statements | bills | confirmations (default: bills)")
+    p.set_defaults(func=cmd_vault)
 
     p = sub.add_parser("receipt", help="file receipts: photo OCR (local) or email scan (read-only)")
     p.add_argument("image", nargs="?", help="photo of a paper receipt (needs [ocr] extra)")

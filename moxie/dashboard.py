@@ -229,6 +229,13 @@ class Dash:
             return "Chat with Moxie"
         if event == "widget_added":
             return f"You added a card: {d.get('title', '?')}"
+        if event == "document_added":
+            via = " (auto-filed from your import)" if d.get("via") == "csv_import" else ""
+            return f"Document filed: {d.get('name', '?')} → {d.get('category', '?')}{via}"
+        if event == "document_removed":
+            return f"Document removed: {d.get('name', '?')}"
+        if event == "document_downloaded":
+            return f"Document downloaded: {d.get('name', '?')}"
         if event == "widget_removed":
             return "You removed a card"
         if event == "layout_changed":
@@ -402,7 +409,7 @@ class Dash:
 
     def import_csv_text(self, name: str, text: str) -> dict:
         """In-browser CSV import: the file is read client-side and its text
-        POSTed here — it never needs to touch disk."""
+        POSTed here. A dated copy is auto-filed to the document vault."""
         from .connectors import import_csv_text
         if not (text or "").strip():
             return {"error": "empty file"}
@@ -416,8 +423,52 @@ class Dash:
         actions = self.agent.scan(txns)
         self.audit.append("csv_imported", {"name": (name or "upload.csv")[:80],
                                            "transactions": len(txns)})
+        archived = self._vault().archive_csv(name, text)
+        if archived and archived.get("ok"):
+            self.audit.append("document_added",
+                              {"category": "statements", "name": archived["name"],
+                               "via": "csv_import"})
         return {"transactions": len(txns), "found": len(actions),
-                "suppressed": self.agent.last_suppressed}
+                "suppressed": self.agent.last_suppressed,
+                "archived": bool(archived and archived.get("ok"))}
+
+    # ---- the document vault ---------------------------------------------------
+    def _vault(self):
+        from .documents import DocumentVault
+        return DocumentVault(self.config)
+
+    def documents_list(self) -> dict:
+        from .documents import ALLOWED_EXTENSIONS, CATEGORIES
+        return {"files": self._vault().list(),
+                "categories": list(CATEGORIES),
+                "allowed": list(ALLOWED_EXTENSIONS)}
+
+    def document_add(self, category: str, name: str, content_b64: str) -> dict:
+        import base64
+        try:
+            data = base64.b64decode((content_b64 or "").encode("ascii"),
+                                    validate=True)
+        except Exception:
+            return {"error": "upload wasn't valid base64"}
+        out = self._vault().add(category, name, data)
+        if out.get("ok"):
+            self.audit.append("document_added",
+                              {"category": out["category"], "name": out["name"],
+                               "via": "upload"})   # names only, never contents
+        return out
+
+    def document_delete(self, category: str, name: str) -> dict:
+        if not self._vault().delete(category, name):
+            return {"error": "no such document"}
+        self.audit.append("document_removed", {"category": category, "name": name})
+        return {"ok": True}
+
+    def document_read(self, category: str, name: str) -> "bytes | None":
+        data = self._vault().read(category, name)
+        if data is not None:
+            self.audit.append("document_downloaded",
+                              {"category": category, "name": name})
+        return data
 
     def load_sample_data(self) -> dict:
         """The zero-risk demo: bundled fictional data, same pipeline."""
@@ -782,6 +833,26 @@ your accounts, trends, and upcoming bills will appear here.</div>
 <h2 id="findings_h">Findings <button onclick="rescan()" style="margin-left:8px">re-scan</button></h2>
 <table id="findings"></table>
 
+<h2>Documents</h2>
+<div class="card">
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px">
+    <select id="doc_cat" style="background:var(--bg); color:var(--fg); border:1px solid var(--line);
+            border-radius:7px; padding:7px 10px; font-size:13px">
+      <option value="receipts">receipts</option>
+      <option value="statements">statements</option>
+      <option value="bills">bills</option>
+      <option value="confirmations">confirmations</option>
+    </select>
+    <label class="filebtn"><input type="file" id="doc_file" style="display:none"
+      accept=".pdf,.png,.jpg,.jpeg,.csv,.txt,.eml" onchange="docUpload(this)">Upload a document…</label>
+    <span class="muted" id="doc_msg"></span>
+  </div>
+  <table id="doc_list" style="font-size:13px"></table>
+  <div class="muted" style="margin-top:8px">Moxie's own folder (<code>~/.moxie/vault</code>):
+    receipts, statements, bills, confirmations. Imported CSVs are filed automatically.
+    Files are encrypted at rest when encryption is on, and downloads never render in the browser.</div>
+</div>
+
 <h2>Activity</h2>
 <div class="card" style="padding:6px 14px">
   <table id="activity" style="font-size:13px"></table>
@@ -1038,6 +1109,40 @@ async function removeWidget(id){
   const r = await api('/api/widgets/remove', {id});
   toast(r.error || 'Card removed'); renderWidgets();
 }
+function docUpload(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  if(file.size > 10*1024*1024){ $('doc_msg').textContent = '✗ max 10 MB'; return; }
+  $('doc_msg').textContent = ' filing '+file.name+'…';
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const b64 = String(reader.result).split(',')[1] || '';
+    const r = await api('/api/documents/upload',
+      {category: val('doc_cat'), name: file.name, content_b64: b64});
+    $('doc_msg').textContent = r.error ? '✗ '+r.error : '✓ filed as '+r.name
+      + (r.sealed ? ' (encrypted)' : '');
+    input.value = ''; renderDocs();
+  };
+  reader.readAsDataURL(file);
+}
+async function docDelete(cat, name){
+  const r = await api('/api/documents/delete', {category: cat, name});
+  toast(r.error || 'Removed '+name); renderDocs();
+}
+async function renderDocs(){
+  const out = await api('/api/documents');
+  const files = out.files || [];
+  $('doc_list').innerHTML = files.length ? files.map(f =>
+    '<tr><td class="muted" style="width:110px">'+esc(f.category)+'</td>'+
+    '<td>'+esc(f.name)+'</td>'+
+    '<td class="muted" style="white-space:nowrap">'+(f.size/1024).toFixed(0)+' KB · '+esc(f.modified.replace('T',' '))+'</td>'+
+    '<td style="white-space:nowrap; text-align:right">'+
+    '<a href="/api/documents/get?category='+encodeURIComponent(f.category)+
+      '&name='+encodeURIComponent(f.name)+'"><button>download</button></a> '+
+    '<button onclick="docDelete(\\''+esc(f.category)+'\\',\\''+esc(f.name)+'\\')">✕</button></td></tr>'
+  ).join('')
+  : '<tr><td class="muted">Nothing filed yet — upload above, or import a CSV (it archives itself).</td></tr>';
+}
 function proposalChip(p){
   window._proposal = p;
   const label = p.kind==='add' ? 'Add this card: "'+esc(p.spec.title)+'"?'
@@ -1173,7 +1278,7 @@ async function detect(){ const r = await api('/api/telegram/detect', {});
   window._chat = r.chat_id;
   $('detected').textContent = ' found: '+r.name+' ('+r.chat_id+')';
   $('pairbtn').style.display = 'inline-block'; }
-refresh(); loadChat(); renderMoney(); renderWidgets();
+refresh(); loadChat(); renderMoney(); renderWidgets(); renderDocs();
 setInterval(()=>{refresh(); renderMoney(); renderWidgets();}, 15000);
 </script></body></html>"""
 
@@ -1304,6 +1409,27 @@ def make_handler(dash: Dash):
                     self._json(dash.money())
                 elif self.path == "/api/widgets":
                     self._json(dash.widgets_list())
+                elif self.path == "/api/documents":
+                    self._json(dash.documents_list())
+                elif self.path.startswith("/api/documents/get"):
+                    query = urllib.parse.parse_qs(
+                        urllib.parse.urlparse(self.path).query)
+                    category = (query.get("category") or [""])[0]
+                    name = (query.get("name") or [""])[0]
+                    data = dash.document_read(category, name)
+                    if data is None:
+                        self._json({"error": "no such document"}, 404)
+                    else:
+                        # attachments ONLY — an uploaded file must never render
+                        # inline in the dashboard's origin, whatever it claims.
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/octet-stream")
+                        self.send_header("Content-Disposition",
+                                         f'attachment; filename="{name}"')
+                        self.send_header("X-Content-Type-Options", "nosniff")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
                 else:
                     self._json({"error": "not found"}, 404)
             elif self.path == "/favicon.svg" or self.path == "/favicon.ico":
@@ -1395,6 +1521,13 @@ def make_handler(dash: Dash):
                 self._json(dash.widget_remove(form.get("id", "")))
             elif self.path == "/api/layout":
                 self._json(dash.layout_set(form.get("spec")))
+            elif self.path == "/api/documents/upload":
+                self._json(dash.document_add(form.get("category", ""),
+                                             form.get("name", ""),
+                                             form.get("content_b64", "")))
+            elif self.path == "/api/documents/delete":
+                self._json(dash.document_delete(form.get("category", ""),
+                                                form.get("name", "")))
             elif self.path == "/api/import/csv":
                 self._json(dash.import_csv_text(form.get("name", ""),
                                                 form.get("text", "")))

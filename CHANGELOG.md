@@ -3,6 +3,23 @@
 All notable changes to Moxie. Versions follow [semantic versioning](https://semver.org);
 Moxie stays pre-1.0 until an independent security review (see [SECURITY.md](SECURITY.md)).
 
+## Unreleased
+
+- **The document vault.** Moxie now owns one folder for your money papers —
+  `~/.moxie/vault/` with receipts, statements, bills, and confirmations. A
+  Documents section on the dashboard lists, uploads, downloads, and deletes;
+  imported CSVs auto-archive a dated copy; `moxie receipt` files the source
+  image; `moxie vault list|add` gives CLI parity. Built defensively: path
+  traversal hard-blocked, extension whitelist (no browser-executable types),
+  10 MB cap, downloads served as attachments with nosniff (never rendered
+  inline), files Fernet-encrypted at rest when `moxie encrypt` is on, and
+  every add/remove/download audited by name — never contents.
+- **Hardening from real-world use:** the Telegram bot survives a failing
+  message (admits the error in-chat instead of dying silently), storage is
+  thread-safe under the dashboard's parallel requests, unreadable rows are
+  skipped and reported by `moxie doctor` instead of taking the page down,
+  and cp1252 consoles can't crash any entry point.
+
 ## 0.3.0 — see all your money, and a dashboard that grows on request
 
 - **The money dashboard.** A full Money section: per-account balances (once a
