@@ -1416,6 +1416,17 @@ def serve(config, store, audit, port: int = 8484, host: str = "127.0.0.1",
     return server
 
 
+def _emoji_safe_streams() -> None:
+    """Consoles that can't encode the badger (cp1252) must degrade, not die —
+    applied here too so programmatic entry points are as safe as the CLI."""
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):
+            pass
+
+
 def maybe_open_browser(url: str, force: "bool | None" = None) -> bool:
     """Open the user's browser at the dashboard — the one-command front door.
     Skipped when MOXIE_NO_BROWSER is set or there's no interactive terminal
@@ -1437,6 +1448,7 @@ def maybe_open_browser(url: str, force: "bool | None" = None) -> bool:
 
 
 def run_dashboard(config, store, audit, port: int = 8484, open_browser=None):
+    _emoji_safe_streams()
     server = serve(config, store, audit, port=port)
     actual = server.server_address[1]
     url = f"http://127.0.0.1:{actual}"

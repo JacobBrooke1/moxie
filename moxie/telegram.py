@@ -239,14 +239,19 @@ class Bot:
         return f"🦡 Morning check-in:\n\n{self._findings_text()}"
 
     def run(self, once: bool = False) -> None:
+        from .dashboard import _emoji_safe_streams
+        _emoji_safe_streams()
         offset = 0
         print("🦡 Moxie Telegram bot running. Ctrl-C to stop.")
         if not self.allow:
             print("   Not paired yet — message your bot and it will show your chat id.")
         while True:
-            tick = self.daily_tick()
-            if tick and self.allow:
-                self.api.send(self.allow, tick)
+            try:
+                tick = self.daily_tick()
+                if tick and self.allow:
+                    self.api.send(self.allow, tick)
+            except Exception as e:
+                print(f"   (daily tick failed: {e}; carrying on)")
             try:
                 updates = self.api.updates(offset)
             except Exception as e:
@@ -260,9 +265,20 @@ class Bot:
                 text = msg.get("text", "")
                 if chat_id is None:
                     continue
-                reply = self.handle(chat_id, text)
+                # One bad message must never kill the bot: catch, admit it
+                # honestly, log it, keep serving.
+                try:
+                    reply = self.handle(chat_id, text)
+                except Exception as e:
+                    self.audit.append("telegram_error", {"error": str(e)[:200]})
+                    reply = (f"⚠️ That broke on my end ({type(e).__name__}) — "
+                             "still here though. Try again, or check the "
+                             "dashboard's Activity feed.")
                 if reply:
-                    self.api.send(chat_id, reply)
+                    try:
+                        self.api.send(chat_id, reply)
+                    except Exception as e:
+                        print(f"   (send failed: {e}; carrying on)")
             if once:
                 return
 

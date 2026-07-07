@@ -27,6 +27,8 @@ def run_serve(config, store, audit, port: int = 8484, once: bool = False,
               bot_api=None) -> dict:
     """Start everything; block until Ctrl-C (or return after one pass when
     once=True — that's the testable path)."""
+    from .dashboard import _emoji_safe_streams
+    _emoji_safe_streams()
     host = os.environ.get("MOXIE_DASH_HOST", "127.0.0.1")
     server = dash_serve(config, store, audit, port=port, host=host)
     dash_thread = threading.Thread(target=server.serve_forever, daemon=True)
