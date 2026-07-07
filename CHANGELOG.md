@@ -3,7 +3,7 @@
 All notable changes to Moxie. Versions follow [semantic versioning](https://semver.org);
 Moxie stays pre-1.0 until an independent security review (see [SECURITY.md](SECURITY.md)).
 
-## Unreleased
+## 0.4.0 — the document vault, and battle scars
 
 - **The document vault.** Moxie now owns one folder for your money papers —
   `~/.moxie/vault/` with receipts, statements, bills, and confirmations. A
