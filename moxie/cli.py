@@ -440,6 +440,9 @@ def cmd_doctor(args):
 
     txns = store.load_transactions()
     print(f"  [{'ok' if txns else ' -'}] Transactions on file: {len(txns)}")
+    if store.load_errors:
+        print(f"  [ !] Store: skipped unreadable row(s): {store.load_errors} — "
+              "healthy rows still load; if this number grows, tell us in an issue")
 
     ok, bad = audit.verify()
     print(f"  [ok] Audit log intact ({len(audit.entries())} entries)" if ok
