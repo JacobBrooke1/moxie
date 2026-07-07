@@ -29,3 +29,6 @@ data/
 .idea/
 .vscode/
 *.swp
+
+# local dev harness
+.claude/
